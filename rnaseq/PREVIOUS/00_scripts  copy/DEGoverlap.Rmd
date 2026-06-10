@@ -1,0 +1,252 @@
+---
+title: "DEGoverlap"
+params:                              
+  experiment_id: S3_S4_COMP
+  author: "Shalise Burch"
+  date: "2026-02-17"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE   
+---
+
+T21 RA vs D21 RA 
+```{r message=FALSE, warning=FALSE}
+# UPDATED: 
+# 2026-02-18 15:47 SAB ------------------------------
+
+library(here)
+library(dplyr)
+library(stringr)
+
+exp_name <- params$experiment_id
+data_path <- here("rnaseq", "01_data")
+results_path <- here("rnaseq", "02_results")
+rdata_path <- here("rnaseq", "03_rdata")
+
+source(here(exp_name, "functions.R"))
+
+head_dir <- file.path(results_path, "DEG Overlap Analysis")
+make_subdir(head_dir)
+
+out_dir <- file.path(head_dir, "SET3vSET4")
+make_subdir(out_dir)
+
+
+```
+
+```{r}
+SAB01_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_DEG_unfiltered_ALL.rds")
+SAB08_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB08/rnaseq/03_rdata/SAB08_DEG_unfiltered_ALL.rds")
+
+```
+
+```{r}
+# Find the inner element for a given day 
+get_day_df <- function(DEG_all, contrast, day) {
+  stopifnot(contrast %in% names(DEG_all))
+  
+  inner <- DEG_all[[contrast]]
+  inner_names <- names(inner)
+  if (is.null(inner_names)) stop("Inner list has no names; can't find day keys.")
+  
+  # robust match: any key that contains "D4" as a token (handles "D4", "day_D4", "D4_something")
+  hits <- inner_names[str_detect(inner_names, regex(paste0("\\b", day, "\\b"), ignore_case = TRUE))]
+  
+  # fallback: if day isn't a clean token, match just "D4" anywhere
+  if (length(hits) == 0) {
+    hits <- inner_names[str_detect(inner_names, fixed(day, ignore_case = TRUE))]
+  }
+  
+  if (length(hits) == 0) {
+    stop(paste0("No inner key matched day=", day, " for contrast=", contrast,
+                ". Available keys: ", paste(inner_names, collapse = ", ")))
+  }
+  
+  # If multiple matches (rare), choose first but warn
+  if (length(hits) > 1) {
+    warning(paste0("Multiple keys matched ", day, " for ", contrast, ": ",
+                   paste(hits, collapse = ", "), ". Using: ", hits[1]))
+  }
+  
+  as.data.frame(inner[[hits[1]]])
+}
+
+#filter DEGS
+filter_deg_genes <- function(df,
+                             padj_cut = 0.05,
+                             lfc_cut = 0.5,
+                             lfc_col = "log2FoldChange_raw",
+                             gene_col_candidates = c("gene_id","gene","symbol")) {
+  
+  if (!("padj" %in% names(df))) stop("No 'padj' column found.")
+  if (!(lfc_col %in% names(df))) stop(paste0("No '", lfc_col, "' column found."))
+
+  gene_col <- gene_col_candidates[gene_col_candidates %in% names(df)][1]
+  if (is.na(gene_col)) stop("No gene column found (expected gene_id/gene/symbol).")
+
+  df_f <- df %>%
+    filter(!is.na(padj), padj < padj_cut) %>%
+    filter(!is.na(.data[[lfc_col]]), abs(.data[[lfc_col]]) > lfc_cut)
+
+  genes_all <- unique(df_f[[gene_col]])
+  genes_up  <- unique(df_f[[gene_col]][df_f[[lfc_col]] > 0])
+  genes_dn  <- unique(df_f[[gene_col]][df_f[[lfc_col]] < 0])
+
+  list(df = df_f, all = genes_all, up = genes_up, down = genes_dn, gene_col = gene_col)
+}
+```
+
+contrasts
+```{r}
+ctA <- "T21_RA_vs_D21_RA"
+ctB <- "D21_RA_vs_D21_CTRL"
+
+lfc_col <- "log2FoldChange_raw"   # change to raw if needed
+padj_cut <- 0.05
+lfc_cut  <- 0.5
+day_use  <- "D4"
+
+# SAB01 SET3
+sab01_A_df <- get_day_df(SAB01_all, ctA, day_use)
+sab01_B_df <- get_day_df(SAB01_all, ctB, day_use)
+
+sab01_A <- filter_deg_genes(sab01_A_df, padj_cut, lfc_cut, lfc_col)
+sab01_B <- filter_deg_genes(sab01_B_df, padj_cut, lfc_cut, lfc_col)
+
+# SAB08 SET4
+sab08_A_df <- get_day_df(SAB08_all, ctA, day_use)
+sab08_B_df <- get_day_df(SAB08_all, ctB, day_use)
+
+sab08_A <- filter_deg_genes(sab08_A_df, padj_cut, lfc_cut, lfc_col)
+sab08_B <- filter_deg_genes(sab08_B_df, padj_cut, lfc_cut, lfc_col)
+```
+
+```{r}
+overlap_sets <- function(x, y) {
+  list(
+    shared = intersect(x, y),
+    SAB01_only = setdiff(x, y),
+    SAB08_only = setdiff(y, x)
+  )
+}
+
+
+A_all  <- overlap_sets(sab01_A$all,  sab08_A$all)
+A_up   <- overlap_sets(sab01_A$up,   sab08_A$up)
+A_down <- overlap_sets(sab01_A$down, sab08_A$down)
+
+B_all  <- overlap_sets(sab01_B$all,  sab08_B$all)
+B_up   <- overlap_sets(sab01_B$up,   sab08_B$up)
+B_down <- overlap_sets(sab01_B$down, sab08_B$down)
+
+#identify  inconsistency genes
+consistent_genes_A <- c(A_up$shared, A_down$shared)
+inconsistent_genes_A <- setdiff(A_all$shared, consistent_genes_A)
+
+consistent_genes_B <- c(B_up$shared, B_down$shared)
+inconsistent_genes_B <- setdiff(B_all$shared, consistent_genes_B)
+
+
+#summary table
+summary_table <- tibble::tibble(
+  contrast = c(ctA, ctB),
+  
+  SAB01_all = c(length(sab01_A$all), length(sab01_B$all)),
+  SAB08_all = c(length(sab08_A$all), length(sab08_B$all)),
+  shared_all = c(length(A_all$shared), length(B_all$shared)),
+  
+  shared_up = c(length(A_up$shared), length(B_up$shared)),
+  shared_down = c(length(A_down$shared), length(B_down$shared))
+)
+
+print(summary_table)
+```
+
+```{r}
+shared_genotype_under_RA <- c(A_up$shared, A_down$shared)  
+shared_canonical_RA      <- c(B_up$shared, B_down$shared)  
+
+shared_both <- intersect(shared_genotype_under_RA, shared_canonical_RA)
+
+cat("Shared (T21_RA vs D21_RA) at D4:", length(shared_genotype_under_RA), "\n")
+cat("Shared (D21_RA vs D21_CTRL) at D4:", length(shared_canonical_RA), "\n")
+cat("Overlap between those shared cores:", length(shared_both), "\n")
+
+out <- list(
+  day = day_use,
+  lfc_col = lfc_col,
+  filters = list(padj_cut = padj_cut, lfc_cut = lfc_cut),
+
+  A_T21RA_vs_D21RA = list(  all = A_all, up = A_up, down = A_down, consistent = consistent_genes_A, inconsistent = inconsistent_genes_A),
+  B_D21RA_vs_CTRL  = list(all = B_all, up = B_up, down = B_down, consistent = consistent_genes_B, inconsistent = inconsistent_genes_B),
+
+  shared_both = shared_both
+)
+
+file_name <- paste0("D4_overlap_SAB01_SAB08_", Sys.Date(), ".rds")
+
+saveRDS(out, file = file.path(out_dir, file_name))
+```
+
+save excel
+```{r}
+library(writexl)
+
+# Prepare Excel sheets
+excel_list <- list(
+  Summary = summary_table,
+  
+  A_shared_all = data.frame(gene = A_all$shared),
+  A_shared_up = data.frame(gene = A_up$shared),
+  A_shared_down = data.frame(gene = A_down$shared),
+  A_consistent = data.frame(gene = consistent_genes_A),
+  A_inconsistent = data.frame(gene = inconsistent_genes_A),
+  
+  B_shared_all = data.frame(gene = B_all$shared),
+  B_shared_up = data.frame(gene = B_up$shared),
+  B_shared_down = data.frame(gene = B_down$shared),
+  B_consistent = data.frame(gene = consistent_genes_B),
+  B_inconsistent = data.frame(gene = inconsistent_genes_B),
+  
+  
+  Shared_between_contrasts = data.frame(gene = shared_both)
+)
+
+excel_file <- file.path(out_dir,
+                         paste0("D4_overlap_summary_SAB01_SAB08_", Sys.Date(), ".xlsx"))
+
+write_xlsx(excel_list, excel_file)
+```
+PDF summary
+```{r}
+pdf_file <- file.path(out_dir,
+                      paste0("D4_overlap_counts_SAB01_SAB08_", Sys.Date(), ".pdf"))
+
+pdf(pdf_file, width = 8, height = 6)
+
+plot.new()
+
+text(0.1, 0.9, paste("D4 DEG Overlap Summary"), adj = 0, cex = 1.4)
+
+text(0.1, 0.8, paste("Contrast A:", ctA), adj = 0)
+text(0.1, 0.75, paste("SAB01 DEGs:", length(sab01_A$all)), adj = 0)
+text(0.1, 0.7, paste("SAB08 DEGs:", length(sab08_A$all)), adj = 0)
+text(0.1, 0.65, paste("Shared (all):", length(A_all$shared)), adj = 0)
+text(0.1, 0.6, paste("Shared (up):", length(A_up$shared)), adj = 0)
+text(0.1, 0.55, paste("Shared (down):", length(A_down$shared)), adj = 0)
+text(0.1, 0.5, paste("Consistent direction:", length(consistent_genes_A)), adj = 0)
+text(0.1, 0.45, paste("Inconsistent direction:", length(inconsistent_genes_A)), adj = 0)
+
+text(0.1, 0.35, paste("Contrast B:", ctB), adj = 0)
+text(0.1, 0.3, paste("SAB01 DEGs:", length(sab01_B$all)), adj = 0)
+text(0.1, 0.25, paste("SAB08 DEGs:", length(sab08_B$all)), adj = 0)
+text(0.1, 0.2, paste("Shared (all):", length(B_all$shared)), adj = 0)
+text(0.1, 0.15, paste("Shared (up):", length(B_up$shared)), adj = 0)
+text(0.1, 0.1, paste("Shared (down):", length(B_down$shared)), adj = 0)
+
+dev.off()
+```
+

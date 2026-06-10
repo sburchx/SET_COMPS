@@ -1,0 +1,200 @@
+---
+title: "03: Assumptions and Statistical Comparisons --Treatment vs Treatment"
+experiment_ID: "SAB04"
+date: "2024-11-11"
+output: 
+  html_document:
+    code_folding: "hide"  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE    
+    message: FALSE     
+    fig.width: 6       
+    fig.height: 4      
+    chunk_labels: TRUE 
+
+---
+#### Last updated: 04-12-25 
+
+
+** Statistical Comparison Workflow – Step-by-Step **
+STEP 1: Setup 
+  a) Load Libraries
+  b) Set Variables 
+  c) Load Data
+STEP 2: Run Statistical Analysis  
+  a) Check assumption 
+  - Normality (Shapiro-Wilk)
+  - Homogeneity of variance (Levene’s)
+  b) Statistical Analysis  
+  - t-test or Wilcoxon depending on assumptions
+STEP 3: Generate Bar Plots w/ Annotations
+  a) Build plot 
+  b) add annotations
+
+
+
+## STEP 1: Setup
+
+##### - Load libraries
+```{r loading libraries, include=FALSE}
+
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(ggpubr)
+library(car)
+library(here)
+library(janitor)
+
+```
+
+##### - Define Variable 
+```{r variables}
+exp_name <- "SAB04"
+
+data_path <- here("flow", "01_data")
+results_path <- here("flow", "02_results")
+rdata_path <- here("flow", "03_rdata")
+
+source(here("flow", "00_scripts", "flow_functions.R"))
+
+save_path <- file.path(results_path, "All Treatments")
+make_subdir(save_path)
+```
+
+##### - Load Data  
+```{r data}
+
+load(file.path(rdata_path, paste0(exp_name, "_customization_data.RData")))
+load(file.path(rdata_path, paste0(exp_name, "_flow_data.RData")))
+
+```
+
+## STEP 2:  Statistical Analysis
+
+#### - Assumptions and Stats 
+```{r treatment }
+multi_results <- multi_flow_test(
+  data = long_data,
+  measurements = measurements,
+  group_var = "treatment",
+  subject_id = "exp_no",
+  stratify_var = "genotype",       # compare treatments within each genotype
+  day_var = "day",
+  value_var = "value",
+  save_dir = save_path,
+  comparison = paste0(exp_name,"_alltreatments_within_genotype")
+)
+
+saveRDS(multi_results, file = file.path(rdata_path, paste0(exp_name,"_alltreatments_within_genotype_stat_results.rds")))
+```
+
+
+
+## STEP 3 : PLOTS with stat annotation
+
+```{r subfolder }
+plots_folder <- file.path(save_path, "Plots")
+make_subdir(plots_folder)
+```
+
+##### - Generate plots with annotaions
+```{r}
+filtered_summary <- sumstats_all %>% filter(day != 3)
+filtered_raw <- long_data %>% filter(day != 3)
+
+plot_list <- list()
+
+for (measure in measurements$measurement) {
+  for (geno in unique(long_data$genotype)) {
+    geno <- as.character(geno)
+    # Create the plot
+    p <- make_flow_plot(
+      measurement_name = measure,
+      summary_data = filtered_summary,
+      raw_data = filtered_raw,
+      cell_val = geno,  
+      folder = save_path,
+      exp_name = exp_name,
+      color_map = color_map
+    )
+    
+        # 🪄 Override guides based on cell type
+    if (grepl("D21", geno)) {
+      p <- p + 
+        scale_fill_manual(name = NULL, values = setNames(color_map$Color, color_map$Group))+
+        guides(
+          fill = guide_legend(order = 1, override.aes = list(alpha = 1)),
+          color = "none", 
+          alpha = "none"
+        )
+    } else if (grepl("T21", geno)) {
+      p <- p + 
+        scale_fill_manual(name = NULL, values = setNames(color_map$Color, color_map$Group))+
+        guides(
+          fill = "none",
+          color = guide_legend(order = 1, override.aes = list(fill = NA)),
+          alpha = "none"
+        )
+    }
+
+    # Annotate stats 
+    p_annot <- add_multi_annotation(
+      plot = p,
+      stats_data = multi_results,           
+      measurement = measure,
+      group_col = "treatment",                
+      stratify_by = "genotype",             
+      stratify_level = geno,
+      show_effect = FALSE,
+      show_pval = FALSE
+    )
+    
+    p_annot <- add_friedman_annotation(
+      plot = p_annot,
+      stats_data = multi_results,
+      measurement = measure,
+      stratify_by = "genotype",
+      stratify_level = geno
+    )
+
+    # Save it
+    ggsave(filename = paste0(exp_name, "_", measure, "_", geno, "_stats.pdf"),
+      plot = p_annot, path = plots_folder,
+      width = 10, height = 5, units = "in"
+    )
+    
+    plot_key <- paste0(measure, "_", geno)
+    plot_list[[plot_key]] <- p_annot
+  }
+}
+
+saveRDS(plot_list, file = file.path(rdata_path, paste0(exp_name, "_alltreatments_plots.rds")))
+
+
+```
+## ----------------------
+## EDITING PLOTS 
+```{r}
+save_path <- file.path(results_path, "All Treatments")
+plots_folder <- file.path(save_path, "Plots")
+
+plot_list <- readRDS(file.path(save_path, paste0(exp_name, "_alltreatments_plots.rds")))
+
+```
+
+```{r}
+# pull plot
+p <- plot_list[["tot_ctnt_T21"]] 
+
+# Zoom in on y-axis (e.g., 0 to 80%)
+p <- p + coord_cartesian(ylim = c(0, 50))
+print(p)
+
+ggsave(filename =paste0(exp_name, "zoomed_tot_ctnt_T21_stats.pdf"), plot =p, path = plots_folder, width = 10, height = 5, units = "in")
+```
+
+
+

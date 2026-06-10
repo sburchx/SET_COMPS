@@ -1,0 +1,1190 @@
+---
+title: "SET2 - SET3 - SET4 Comparison"
+params:                              
+  experiment_id: S2_S3_S4_COMP
+  run_date: 2026-06-09
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE     
+---
+
+STEP 0: Set up
+
+
+# ------------------
+# STEP 0: Setup
+```{r libraries and variables, message=FALSE, warning=FALSE}
+#UPDATED:
+# 2026-06-08 14:30 SAB ------------------------------
+
+library(here)
+library(DESeq2)
+library(limma)
+library(PCAtools)
+library(tximport)
+library(pheatmap)
+library(dplyr) 
+library(ggplot2)
+library(gtools)
+library(ggsci)
+library(stringr) 
+library(edgeR)
+library(grid)
+library(data.table)
+library(tidyverse)
+library(writexl)
+library(ashr)
+
+
+exp_name <- params$experiment_id
+data_path <- here("rnaseq", "01_data")
+results_path <- here("rnaseq", "02_results")
+rdata_path <- here("rnaseq", "03_rdata")
+source(here("rnaseq", "00_scripts", "rnaseq_functions.R"))
+
+
+# load metasheets and txi
+# -- SET 2 -- 
+SAB06_meta <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB06/rnaseq/03_rdata/SAB06_metadataFinal.rds")
+
+SAB06_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/SAB06/star_salmon"
+
+# -- SET 3 -- 
+SAB01_meta <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_metadataFinal.rds")
+
+SAB01_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/20240412_LH00315_0161_B222TJLLT1-XRS-Pl21-IM-RS54-hg38/star_salmon"
+
+
+# -- SET 4 -- 
+SAB08_meta <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB08/rnaseq/03_rdata/SAB08_metadataFinal_outliers_removed.rds")
+
+SAB08_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/SAB08/star_salmon"
+
+
+save_dir <- file.path(results_path, "S2_S3_S4_COMP")
+make_subdir(save_dir)
+
+```
+
+
+## Clean metasheet
+```{r clean data}
+# add seq_run to SAB01 and SAB06 to match SAB08
+SAB01_meta$seq_run <- "1"
+SAB06_meta$seq_run <- "1"
+
+# add cell set identifier
+SAB06_meta$cell_set <- "Set2"
+SAB01_meta$cell_set <- "Set3"
+SAB08_meta$cell_set <- "Set4"
+
+
+# add new sampleID identifier
+SAB06_meta <- SAB06_meta %>%
+  dplyr::mutate(
+    sampleID_original = sampleID,
+    sampleID_unique = paste(cell_set, sampleID, sep = "_")
+  )
+
+SAB01_meta <- SAB01_meta %>%
+  dplyr::mutate(
+    sampleID_original = sampleID,
+    sampleID_unique = paste(cell_set, sampleID, sep = "_")
+  )
+
+SAB08_meta <- SAB08_meta %>%
+  dplyr::mutate(
+    sampleID_original = sampleID,
+    sampleID_unique = paste(cell_set, sampleID, sep = "_")
+  )
+
+# Make sure rownames are new sample IDs
+rownames(SAB06_meta) <- SAB06_meta$sampleID_unique
+rownames(SAB01_meta) <- SAB01_meta$sampleID_unique
+rownames(SAB08_meta) <- SAB08_meta$sampleID_unique
+
+
+#check they match 
+setdiff(colnames(SAB01_meta), colnames(SAB08_meta))
+setdiff(colnames(SAB08_meta), colnames(SAB01_meta))
+setdiff(colnames(SAB06_meta), colnames(SAB01_meta))
+setdiff(colnames(SAB01_meta), colnames(SAB06_meta))
+
+
+```
+
+
+
+## Load txi object
+```{r txi}
+
+# load txi
+SAB01_txi <- salmon_import(SAB01_star_salmon_path)
+SAB08_txi <- salmon_import(SAB08_star_salmon_path)
+SAB06_txi <- salmon_import(SAB06_star_salmon_path)
+
+
+#check sample names 
+colnames(SAB01_txi$counts)
+rownames(SAB01_meta)
+
+colnames(SAB08_txi$counts)
+rownames(SAB08_meta)
+
+colnames(SAB06_txi$counts)
+rownames(SAB06_meta)
+```
+
+
+## clean txi names
+### set 2
+```{r clean txi names}
+
+# Set3: strip SAB01 prefix, align metadata, then assign unique IDs
+strip_prefix <- function(x) sub("^SAB06_", "", x)
+
+# strip first
+for (elt in intersect(names(SAB06_txi), c("counts", "abundance", "length"))) {
+  colnames(SAB06_txi[[elt]]) <- strip_prefix(colnames(SAB06_txi[[elt]]))
+}
+
+# now align metadata to stripped txi column order
+SAB06_meta <- SAB06_meta %>%
+  dplyr::slice(match(colnames(SAB06_txi$counts), sampleID)) %>%
+  dplyr::mutate(
+    sampleID_original = sampleID,
+    sampleID_unique = paste(cell_set, sampleID, sep = "_")
+  )
+
+# rename all txi elements to unique IDs
+for (elt in intersect(names(SAB06_txi), c("counts", "abundance", "length"))) {
+  colnames(SAB06_txi[[elt]]) <- SAB06_meta$sampleID_unique
+}
+
+rownames(SAB06_meta) <- SAB06_meta$sampleID_unique
+
+stopifnot(all(colnames(SAB06_txi$counts) == rownames(SAB06_meta)))
+```
+
+### set 3
+```{r clean txi names}
+
+# Set3: strip SAB01 prefix, align metadata, then assign unique IDs
+strip_prefix <- function(x) sub("^SAB01_", "", x)
+
+# strip first
+for (elt in intersect(names(SAB01_txi), c("counts", "abundance", "length"))) {
+  colnames(SAB01_txi[[elt]]) <- strip_prefix(colnames(SAB01_txi[[elt]]))
+}
+
+# now align metadata to stripped txi column order
+SAB01_meta <- SAB01_meta %>%
+  dplyr::slice(match(colnames(SAB01_txi$counts), sampleID)) %>%
+  dplyr::mutate(
+    sampleID_original = sampleID,
+    sampleID_unique = paste(cell_set, sampleID, sep = "_")
+  )
+
+# rename all txi elements to unique IDs
+for (elt in intersect(names(SAB01_txi), c("counts", "abundance", "length"))) {
+  colnames(SAB01_txi[[elt]]) <- SAB01_meta$sampleID_unique
+}
+
+rownames(SAB01_meta) <- SAB01_meta$sampleID_unique
+
+stopifnot(all(colnames(SAB01_txi$counts) == rownames(SAB01_meta)))
+```
+
+### set4
+```{r}
+
+# strip SAB08 prefix
+strip_prefix <- function(x) sub("^SAB08_", "", x)
+
+for (elt in intersect(names(SAB08_txi), c("counts", "abundance", "length"))) {
+  colnames(SAB08_txi[[elt]]) <- strip_prefix(colnames(SAB08_txi[[elt]]))
+}
+
+# samples shared between txi and metadata
+keep_samples <- intersect(colnames(SAB08_txi$counts), SAB08_meta$sampleID)
+
+# reorder/filter metadata
+SAB08_meta <- SAB08_meta %>%
+  dplyr::slice(match(keep_samples, sampleID)) %>%
+  dplyr::mutate(
+    sampleID_original = sampleID,
+    sampleID_unique = paste(cell_set, sampleID, sep = "_")
+  )
+
+# filter txi AND rename columns to unique IDs in one loop
+for (elt in intersect(names(SAB08_txi), c("counts", "abundance", "length"))) {
+  SAB08_txi[[elt]] <- SAB08_txi[[elt]][, keep_samples, drop = FALSE]
+  colnames(SAB08_txi[[elt]]) <- SAB08_meta$sampleID_unique
+}
+
+rownames(SAB08_meta) <- SAB08_meta$sampleID_unique
+
+stopifnot(all(colnames(SAB08_txi$counts) == rownames(SAB08_meta)))
+```
+
+
+## merge txi and metasheets
+```{r}
+#check genes are order
+all(rownames(SAB01_txi$counts) == rownames(SAB08_txi$counts),
+  rownames(SAB01_txi$counts) == rownames(SAB06_txi$counts))
+
+
+# combine txi objects
+txi_combined <- list(
+  counts = cbind(SAB01_txi$counts, SAB08_txi$counts, SAB06_txi$counts),
+  abundance = cbind(SAB01_txi$abundance, SAB08_txi$abundance, SAB06_txi$abundance),
+  length = cbind(SAB01_txi$length, SAB08_txi$length, SAB06_txi$length),
+  countsFromAbundance = SAB01_txi$countsFromAbundance
+)
+
+# combine metadata
+metadata_combined_clean <- dplyr::bind_rows(
+  SAB01_meta,
+  SAB08_meta,
+  SAB06_meta
+)
+ 
+# reorder metadata to match txi columns
+metadata_combined_clean <- metadata_combined_clean[
+  colnames(txi_combined$counts),
+  ,
+  drop = FALSE
+]
+
+# final safety checks
+stopifnot(all(colnames(txi_combined$counts) == rownames(metadata_combined_clean)))
+stopifnot(anyDuplicated(colnames(txi_combined$counts)) == 0)
+stopifnot(anyDuplicated(rownames(metadata_combined_clean)) == 0)
+```
+
+```{r}
+# safety checks 
+table(metadata_combined_clean$cell_set)
+table(metadata_combined_clean$cell_set, metadata_combined_clean$genotype)
+table(metadata_combined_clean$cell_set, metadata_combined_clean$treatment)
+table(metadata_combined_clean$cell_set, metadata_combined_clean$timepoint)
+
+ncol(txi_combined$counts)
+nrow(metadata_combined_clean)
+all(colnames(txi_combined$counts) == rownames(metadata_combined_clean))
+anyDuplicated(colnames(txi_combined$counts))
+anyDuplicated(rownames(metadata_combined_clean))
+
+```
+
+## save
+```{r}
+saveRDS(txi_combined, file = paste0(rdata_path, "/", exp_name, "_txi.rds"))
+saveRDS(metadata_combined_clean, file = paste0(rdata_path, "/", exp_name, "_metadataFinal.rds"))
+
+save_csv(metadata_combined_clean, file.path(data_path, paste0(exp_name, "_metadataFinal.csv")))
+
+```
+
+
+## Standarize Colors
+```{r standarize colors }
+
+# colors fo figures
+
+treatment_colors <- c("CTRL" = "#999999", "RA" = "#D55E00")
+genotype_colors  <- c("D21" = "#56B4E9", "T21" = "#CC79A7")
+
+tp_levels <- levels(metadata_combined_clean$timepoint)
+
+timepoint_colors <- setNames(
+  ggsci::pal_npg()(length(tp_levels)),
+  tp_levels )
+
+annotation_colors <- list(
+  treatment = treatment_colors[intersect(names(treatment_colors), unique(metadata_combined_clean$treatment))],
+  genotype  = genotype_colors[intersect(names(genotype_colors),  unique(metadata_combined_clean$genotype))],
+  timepoint = timepoint_colors[intersect(names(timepoint_colors), tp_levels)]
+)
+
+#save
+saveRDS(annotation_colors, file = paste0(rdata_path, "/", exp_name, "_annotation_colors.rds"))
+```
+
+# -----------------------
+# STEP 1: Library / Sequencing QC
+
+## library size and sequencing depth 
+```{r}
+libqc_dir <- file.path(save_dir, "Library QC")
+make_subdir(libqc_dir)
+
+metadata <- metadata_combined_clean
+txi <- txi_combined
+
+# load counts and align to metadata 
+count_mat <- txi$counts
+count_mat <- count_mat[, rownames(metadata)]
+
+# Library size per sample
+lib_size <- colSums(count_mat)
+qc_counts <- data.frame(
+  sampleID_unique = names(lib_size),
+  library_size = as.numeric(lib_size),
+  detected_genes_ge10 = colSums(count_mat >= 10),
+  detected_genes_ge1  = colSums(count_mat >= 1)
+) %>%
+left_join(
+  metadata,
+  by = "sampleID_unique"
+)
+
+# summary 
+print(qc_counts %>%
+        select(sampleID_unique, genotype, treatment, timepoint, experimentalBatch,
+               library_size, detected_genes_ge10))
+
+base_theme <- theme_bw() +
+  theme(
+    axis.text.y  = element_text(size = 18, face = "bold"),  
+    axis.text.x  = element_text(size = 20),
+    axis.title   = element_text(size = 20, face = "bold"),
+    plot.title   = element_text(size = 20, face = "bold")
+  )
+
+# Plot library size
+p1 <- ggplot(qc_counts, aes(x = sampleID_unique, y = library_size)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Library size (sum counts)", x = NULL, y = "Total counts")+
+  base_theme
+ggsave(file.path(libqc_dir, paste0(exp_name, "_QC_library_size.png")), p1, width = 10, height = 6)
+
+# Plot detected genes
+p2 <- ggplot(qc_counts, aes(x = sampleID_unique, y = detected_genes_ge10)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Detected genes (counts >= 10)", x = NULL, y = "# genes")+
+  base_theme
+ggsave(file.path(libqc_dir, paste0(exp_name, "_QC_detected_genes_ge10.png")), p2, width = 10, height = 6)
+
+# Optional: log-scale library size (easier to spot low-depth outliers)
+p3 <- ggplot(qc_counts, aes(x = sampleID_unique, y = library_size)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_log10() +
+  labs(title = "Library size (log10)", x = NULL, y = "Total counts (log10)")+
+  base_theme
+ggsave(file.path(libqc_dir, paste0(exp_name, "_QC_library_size_log10.png")), p3, width = 10, height = 6)
+
+#counts
+qc_counts %>%
+  group_by(cell_set) %>%
+  summarise(
+    mean_lib = mean(library_size),
+    median_lib = median(library_size),
+    mean_genes = mean(detected_genes_ge10)
+  )
+```
+
+```{r}
+ggplot(
+  qc_counts,
+  aes(cell_set, library_size)
+) +
+  geom_boxplot()
+
+
+ggplot(
+  qc_counts,
+  aes(cell_set, detected_genes_ge10)
+) +
+  geom_boxplot()
+```
+
+
+# --------------------
+# STEP 2: Check variation
+
+## dds ~1 design
+```{r}
+dds <- DESeqDataSetFromTximport(
+  txi_combined,
+  colData = metadata_combined_clean,
+  design = ~ 1
+)
+
+vsd <- vst(dds, blind = TRUE)
+
+```
+
+## PCA
+```{r}
+all_sampleIDs <- colnames(assay(vsd))
+
+# PCA 1
+save_prefix <- file.path(libqc_dir, paste0(exp_name, "_QC_time_cell_set"))
+generatePCA(vsd = assay(vsd), metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "cell_set", label = "sampleID_unique",
+            save_prefix = save_prefix)
+# PCA 2
+save_prefix <- file.path(libqc_dir, paste0(exp_name, "_QC_cell_set"))
+generatePCA(vsd = assay(vsd), metadata = metadata, all_sampleIDs,
+            colby = "cell_set", shape = NULL, label = "timepoint",
+            save_prefix = save_prefix)
+
+# PCA 3
+save_prefix <- file.path(libqc_dir, paste0(exp_name, "_QC_time_geno"))
+generatePCA(vsd = assay(vsd), metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "genotype", label = NULL,
+            save_prefix = save_prefix)
+```
+
+
+# --------------------
+# STEP 2: Build DESeq2 object + run DESeq
+```{r}
+metadata$cell_set  <- factor(metadata$cell_set, levels = c("Set3", "Set4"))
+metadata$genotype  <- factor(metadata$genotype, levels = c("D21", "T21"))
+metadata$treatment <- factor(metadata$treatment, levels = c("CTRL", "RA"))
+metadata$timepoint <- factor(metadata$timepoint, levels = c("D3", "D4", "D6", "D8", "D10"))
+
+metadata <- metadata[colnames(txi$counts), , drop = FALSE]
+stopifnot(all(colnames(txi$counts) == rownames(metadata)))
+```
+
+##  DESeq2 global effect 
+```{r }
+dds <- DESeqDataSetFromTximport(
+  txi = txi,
+  colData = metadata,
+  design = ~ cell_set + timepoint + genotype + treatment
+)
+
+keep <- edgeR::filterByExpr(
+  counts(dds),
+  group = interaction(
+    metadata$cell_set,
+    metadata$timepoint,
+    metadata$genotype,
+    metadata$treatment,
+    drop = TRUE
+  )
+)
+
+cat("\n============================\n")
+cat(" filterByExpr summary\n")
+cat("============================\n")
+cat("Total genes:    ", nrow(dds), "\n")
+cat("Genes kept:     ", sum(keep), "\n")
+cat("Genes removed:  ", nrow(dds) - sum(keep), "\n")
+cat("Percent removed:", round(100 * (nrow(dds) - sum(keep)) / nrow(dds), 2), "%\n")
+
+dds <- dds[keep, ]
+
+processed_dds <- DESeq(dds)
+
+resultsNames(processed_dds)
+
+```
+
+
+# --------------------
+# STEP 3: PCA - global data check
+## Compute VST for PCA/heatmaps
+
+```{r VST}
+pca_path <- file.path(save_dir, "PCA")
+make_subdir(pca_path)
+```
+
+## QC Global PCA  
+```{r PCA check}
+vsd_dds <- vst(processed_dds, blind = FALSE)
+
+all_sampleIDs <- colnames(assay(vsd_dds))
+
+# PCA 1: biology-first
+save_prefix <- file.path(pca_path, paste0(exp_name, "_colTime"))
+generatePCA(vsd = assay(vsd_dds), metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "cell_set", label = "genotype",
+            save_prefix = save_prefix )
+
+# PCA 2: QC-set-first
+save_prefix <- file.path(pca_path, paste0(exp_name, "_cell_set"))
+generatePCA(vsd = assay(vsd_dds), metadata = metadata, all_sampleIDs,
+            colby = "cell_set", shape = "genotype", label = NA,
+            save_prefix = save_prefix, scale_to_axes = TRUE)
+
+# PCA 3: 
+save_prefix <- file.path(pca_path, paste0(exp_name, "_time_geno"))
+generatePCA(vsd = assay(vsd_dds), metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "genotype", label = NA,
+            save_prefix = save_prefix, scale_to_axes = TRUE)
+
+```
+
+
+```{r PCA check}
+pcaLoadings(
+  vsd_data = assay(vsd_dds),metadata = metadata, sample_ids = all_sampleIDs,
+  exp_name = exp_name, name = "allSamples", results_dir = pca_path)
+
+# print variance captured by each PCA 
+p <- PCAtools::pca(assay(vsd_dds), metadata = metadata, removeVar = 0.9)
+round(p$variance, 2)[1:6]
+```
+
+
+###  - OPTIONAL: Limma Batch Correction
+
+```{r limma}
+#preserve design so doesnt correct for biology 
+design_mat <- model.matrix(~ genotype_timepoint_treatment, data = colData(vsd_dds))
+
+vsd_dds_limmaCorrected <- limma::removeBatchEffect(
+  assay(vsd_dds),
+  batch = vsd_dds$experimentalBatch,
+  design = design_mat
+)
+
+# Ensure limma-corrected matrix has sample IDs and is ordered like metadata
+colnames(vsd_dds_limmaCorrected) <- colnames(assay(vsd_dds))
+vsd_dds_limmaCorrected <- vsd_dds_limmaCorrected[, rownames(metadata), drop = FALSE]
+
+saveRDS(vsd_dds_limmaCorrected, file = paste0(rdata_path, "/", exp_name, "_vsd_dds_limmaCorrected.rds"))
+
+# recheck PCA
+all_sampleIDs <- colnames(vsd_dds_limmaCorrected)
+
+# PCA 1: biology-first
+save_prefix <- file.path(pca_path, paste0(exp_name, "_limma_allSamples_colTime"))
+generatePCA(vsd = vsd_dds_limmaCorrected, metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "treatment", label = NA,
+            save_prefix = save_prefix)
+
+# PCA 2: QC-first
+save_prefix <- file.path(pca_path, paste0(exp_name, "_limma_allSamples_colBatch"))
+generatePCA(vsd = vsd_dds_limmaCorrected, metadata = metadata, all_sampleIDs,
+            colby = "experimentalBatch", shape = "genotype", label = NA,
+            save_prefix = save_prefix)
+
+pcaLoadings(
+  vsd_data = vsd_dds_limmaCorrected, metadata = metadata, sample_ids = all_sampleIDs,
+  exp_name = exp_name, name = "allSamples_limmaCorrection", results_dir = pca_path)  
+
+
+# print variance captured by each PCA 
+p_lima <- PCAtools::pca(vsd_dds_limmaCorrected, metadata = metadata, removeVar = 0.9)
+round(p_lima$variance, 2)[1:6]
+```
+
+limmas corrected not necessary but doesnt appear to mess with biology so will continue to use for cleaner PCAs 
+
+### PC2, 3, 4
+```{r}
+
+# PC1 vs PC3
+p13_time <- PCAtools::biplot(p, x = "PC1", y = "PC3", 
+                             colby = "cell_set", shape = "treatment", lab = metadata[["timepoint"]], returnPlot = TRUE)
+ggsave(file.path(pca_path, paste0(exp_name, "_PCA_PC1_PC3_cell_set.png")),
+       p13_time, width = 6, height = 5, dpi = 300)
+
+# PC2 vs PC3
+p23_time <- PCAtools::biplot(p, x = "PC2", y = "PC3",
+                            colby = "cell_set", shape = "treatment", lab = metadata[["timepoint"]], returnPlot = TRUE)
+ggsave(file.path(pca_path, paste0(exp_name, "_PC2_PC3_cell_set.png")),
+       p23_time, width = 6, height = 5, dpi = 300)
+
+
+p23_time <- PCAtools::biplot(p, x = "PC2", y = "PC3",
+                            colby = "timepoint", shape = "treatment", lab = metadata[["genotype"]], returnPlot = TRUE)
+ggsave(file.path(pca_path, paste0(exp_name, "_PC2_PC3_timepoint.png")),
+       p23_time, width = 6, height = 5, dpi = 300)
+
+# PC1 vs PC4
+p14_batch <- PCAtools::biplot(p, x = "PC1", y = "PC4",
+                             colby = "cell_set", shape = "treatment", lab = metadata[["timepoint"]], returnPlot = TRUE)
+ggsave(file.path(pca_path, paste0(exp_name, "_PC1_PC4_cell_set.png")),
+       p14_batch, width = 6, height = 5, dpi = 300)
+
+p14_batch <- PCAtools::biplot(p, x = "PC1", y = "PC4",
+                             colby = "timepoint", shape = "cell_set", lab = metadata[["treatment"]], returnPlot = TRUE)
+ggsave(file.path(pca_path, paste0(exp_name, "_PC1_PC4_tim.png")),
+       p14_batch, width = 6, height = 5, dpi = 300)
+
+
+```
+
+### QC PCAs
+```{r}
+# D3 only
+d3_ids <- rownames(
+  metadata %>%
+    dplyr::filter(timepoint == "D3")
+)
+
+vsd_d3 <- assay(vsd_dds)[, d3_ids]
+meta_d3 <- metadata[d3_ids, , drop = FALSE]
+
+generatePCA(vsd_d3, meta_d3, d3_ids,
+            colby="cell_set", shape="genotype", label=NULL,
+            save_prefix=file.path(pca_path, paste0(exp_name, "_QC_D3_only")),
+            annotation_colors=annotation_colors)
+
+# D3, D4, D6
+early_ids <- rownames(
+  metadata %>%
+    dplyr::filter(timepoint %in% c("D3", "D4", "D6"))
+)
+
+vsd_early <- assay(vsd_dds)[, early_ids]
+meta_early <- metadata[early_ids, , drop = FALSE]
+
+generatePCA(vsd_early, meta_early, early_ids,
+  colby = "timepoint", shape = "cell_set", label = "genotype",
+  save_prefix = file.path(pca_path, paste0(exp_name, "_QC_D3_D4_D6_timepoint")),
+  annotation_colors = annotation_colors)
+
+generatePCA(vsd_early, meta_early, early_ids,
+  colby = "treatment", shape = "cell_set", label = "genotype",
+  save_prefix = file.path(pca_path, paste0(exp_name, "_QC_D3_D4_D6_treatment")),
+  annotation_colors = annotation_colors
+)
+
+generatePCA(vsd_early, meta_early, early_ids,
+  colby = "genotype", shape = "cell_set", label = "treatment",
+  save_prefix = file.path(pca_path, paste0(exp_name, "_QC_D3_D4_D6_genotype")),
+  annotation_colors = annotation_colors
+)
+
+```
+
+# --  STOPPED HERE -- #
+
+## PCAs
+```{r}
+
+# all samples
+ids <- get_ids(metadata)
+generatePCA(vsd_mat, metadata, ids,
+            colby="timepoint", shape="treatment", label="genotype",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_allSamples")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_mat, metadata, ids,
+            colby="timepoint", shape="genotype", label="treatment",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_allSamples2")),
+            annotation_colors=annotation_colors)
+
+
+# CTRL only
+ids <- get_ids(metadata, treatments="CTRL")
+
+generatePCA(vsd_mat, metadata, ids,
+            colby="timepoint", shape="genotype", label=NA,
+            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only")),
+            annotation_colors=annotation_colors)
+
+
+# RA only + D3 pretreatment
+ids <- metadata %>%
+  dplyr::filter(treatment == "RA" | timepoint == "D3") %>%
+  dplyr::pull(sampleID)
+
+generatePCA(vsd_mat, metadata, ids,
+            colby="timepoint", shape="genotype", label=NA,
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only")),
+            annotation_colors=annotation_colors)
+
+```
+
+## Correlation heatmaps 
+(using VST or batch-corrected)
+
+### all samples
+```{r}
+
+heatmap_path <- file.path(save_dir, "Heatmap")
+make_subdir(heatmap_path)
+
+
+heatmap_plots <- list()
+
+# SORT:timepoint -> treatment -> genotype
+genotype_order <- factor(metadata$genotype, levels = c("D21", "T21"))
+meta_hm <- metadata[order(metadata$timepoint, metadata$treatment, genotype_order), ]
+
+# subset VST matrix using defined order
+vsd_all <- vsd_mat[, meta_hm$sampleID, drop = FALSE]
+cor_matrix <- cor(vsd_all)
+
+rownames(cor_matrix) <- meta_hm$genotype_timepoint_treatment_batch
+colnames(cor_matrix) <- meta_hm$sampleID
+
+
+col_annotation <- data.frame(
+  timepoint = meta_hm$timepoint,
+  treatment = meta_hm$treatment,
+  genotype  = meta_hm$genotype
+)
+rownames(col_annotation) <- meta_hm$sampleID
+
+# gap based on num of timepoints 
+num_clusters <- length(unique(meta_hm$timepoint))
+
+# generate heatmap 
+heatmap_filename <- file.path(heatmap_path, paste0(exp_name, "_heatmap_allSamples.png"))
+ph1 <- pheatmap(
+  cor_matrix,
+  filename = heatmap_filename,
+  main = "Correlation Heatmap - All Samples",
+  annotation_col = col_annotation,
+  cluster_rows = TRUE,
+  cluster_cols = FALSE,
+  cutree_rows = num_clusters,
+  display_numbers = FALSE,
+  color = viridis::viridis(100),
+  annotation_colors = annotation_colors,
+  border_color = NA,
+  fontsize_row = 10,
+  fontsize_col = 8,
+  height = 10,
+  width = 10
+)
+
+heatmap_plots[["heatmap_allSamples"]] <- ph1
+```
+
+### by treatment 
+```{r}
+unique_treatments <- unique(metadata$treatment)
+
+# loop through each treatent and generate heatpmap
+for (trt in unique_treatments) {
+
+  #sort for plotting
+  meta_sub <- metadata[metadata$treatment == trt, ]
+  genotype_order <- factor(meta_sub$genotype, levels = c("D21", "T21"))
+  meta_sub <- meta_sub[order(meta_sub$timepoint, genotype_order), ]
+
+  vsd_subset <- vsd_mat[, meta_sub$sampleID, drop = FALSE]
+  cor_matrix <- cor(vsd_subset)
+
+  rownames(cor_matrix) <- meta_sub$genotype_timepoint_treatment_batch
+  colnames(cor_matrix) <- meta_sub$sampleID
+
+  col_annotation <- data.frame(
+    timepoint = meta_sub$timepoint,
+    genotype  = meta_sub$genotype
+  )
+  rownames(col_annotation) <- meta_sub$sampleID
+
+  num_clusters <- length(unique(meta_sub$timepoint))
+  heatmap_filename <- file.path(heatmap_path, paste0(exp_name, "_heatmap_", trt, ".png"))
+
+  phtrt <- pheatmap(
+    cor_matrix,
+    filename = heatmap_filename,
+    main = paste("Correlation Heatmap -", trt, "Samples"),
+    annotation_col = col_annotation,
+    cluster_rows = TRUE,
+    cluster_cols = FALSE,
+    cutree_rows = num_clusters,
+    display_numbers = FALSE,
+    color = viridis::viridis(100),
+    annotation_colors = annotation_colors,
+    border_color = NA,
+    fontsize_row = 10,
+    fontsize_col = 8,
+    height = 10,
+    width = 10
+  )
+
+  heatmap_plots[[paste0("heatmap_", trt)]] <- phtrt
+}
+
+# save all 
+saveRDS(heatmap_plots, file = file.path(rdata_path, paste0(exp_name, "_all_heatmap_objects.rds")))
+
+```
+
+
+## DESeq RA interaction
+```{r}
+dds_int <- DESeqDataSetFromTximport(
+  txi = txi,
+  colData = metadata,
+  design = ~ cell_set + timepoint + genotype + treatment + genotype:treatment
+)
+
+dds_int <- DESeq(dds_int)
+resultsNames(dds_int)
+```
+
+
+## --------------------
+# STEP 4: DEseq2 DEG analysis
+
+```{r}
+log2FC_Cutoff <- 0.5
+fdrCutoff <- 0.05
+
+deg_path <- file.path(save_dir, paste0("L2FC", log2FC_Cutoff, "_FDR", fdrCutoff))
+make_subdir(deg_path)
+
+# Check metadata and DESeq object alignment
+if (!all(rownames(metadata) == colnames(processed_dds))) {
+  warning("⚠️ Rownames in metadata do NOT match colnames in processed_dds!")
+  
+  cat("🔍 Mismatch summary:\n")
+  cat(" - Metadata rows:", nrow(metadata), "\n")
+  cat(" - DESeq2 columns:", ncol(processed_dds), "\n")
+  cat(" - First few metadata row names:\n", head(rownames(metadata)), "\n")
+  cat(" - First few DESeq2 column names:\n", head(colnames(processed_dds)), "\n")
+  
+} else {
+  cat("✅ Metadata rownames match DESeq2 column names.\n")
+}
+
+```
+
+
+##  DE Analysis
+-perform differential expression analysis for comparision across time points
+-apply the DESeq2 package to extract differentially expressed genes (DEGs) and organizes in two list (a) filtered DEGS, up dn (b) unfilterd all genes 
+
+```{r DEG comps}
+# define DEG comparisons to make 
+deg_comparisons <- list(
+  "T21_CTRL_vs_D21_CTRL"   = list(genotype1 = "T21", genotype2 = "D21", treat1 = "CTRL", treat2 = "CTRL"),
+  "T21_RA_vs_D21_RA"   = list(genotype1 = "T21", genotype2 = "D21", treat1 = "RA", treat2 = "RA"),
+  "D21_RA_vs_D21_CTRL" = list(genotype = "D21", treat1 = "CTRL", treat2 = "RA"),
+  "T21_RA_vs_T21_CTRL" = list(genotype = "T21", treat1 = "CTRL", treat2 = "RA")
+)
+
+timepoints <- unique(metadata$timepoint)
+
+```
+
+
+```{r DE analysis, message=FALSE}
+# master lists 
+filtered_results <- list()
+unfiltered_results <- list()
+
+for (comp in names(deg_comparisons)) {
+  comp_info <- deg_comparisons[[comp]]
+  
+  # lists for current comparison
+  filtered_list <- list()
+  unfiltered_list <- list()
+  
+  for (d in timepoints) {
+    
+    # Dynamically build contrast groups and ID
+    if (!is.null(comp_info$genotype1)) {
+      x <- paste0(comp_info$genotype1, "_", d, "_", comp_info$treat1)
+      y <- paste0(comp_info$genotype2, "_", d, "_", comp_info$treat2)
+      id <- paste0(comp_info$genotype1, "_", d, "_", comp_info$treat1, 
+                   "_vs_", comp_info$genotype2, "_", d, "_", comp_info$treat2)
+    } else {
+      genotype <- comp_info$genotype
+      x <- paste0(genotype, "_", d, "_", comp_info$treat2)
+      y <- paste0(genotype, "_", d, "_", comp_info$treat1)
+      id <- paste0(genotype, "_", d, "_", comp_info$treat2, 
+                   "_vs_", genotype, "_", d, "_", comp_info$treat1)
+    }
+    
+    # Only run if both contrast groups exist
+    if (x %in% unique(processed_dds$genotype_timepoint_treatment) && 
+        y %in% unique(processed_dds$genotype_timepoint_treatment)) {
+      
+      res <- DESeq2::results(processed_dds, contrast = c("genotype_timepoint_treatment", x, y), alpha=fdrCutoff)
+      res_shrunk <- lfcShrink(dds = processed_dds, contrast = c("genotype_timepoint_treatment", x, y), res = res, type = "ashr")
+      
+      # Add both raw and shrunk LFC using gene_id join
+      res_df <- as.data.frame(res) %>% rownames_to_column("gene_id")
+      res_shrunk_df <- as.data.frame(res_shrunk) %>% rownames_to_column("gene_id")
+      
+      # Join by gene_id and filter out rows with NA padj
+      merged_df <- inner_join(res_shrunk_df, res_df[, c("gene_id", "log2FoldChange")], by = "gene_id") %>%
+        filter(!is.na(padj)) %>%
+        dplyr::rename(
+          log2FoldChange_shrunk = log2FoldChange.x,
+          log2FoldChange_raw = log2FoldChange.y
+        ) %>%
+        dplyr::select(gene_id, baseMean, log2FoldChange_shrunk, log2FoldChange_raw, pvalue, padj)
+      
+      unfiltered_list[[id]] <- merged_df
+
+      # Filter significant DEGs (based on raw LFC)
+      tmp <- merged_df %>%
+        dplyr::filter(!is.na(padj), abs(log2FoldChange_raw) > log2FC_Cutoff, padj < fdrCutoff)
+
+      filtered_list[[paste0(id, ".up")]] <- tmp %>% filter(log2FoldChange_raw > 0) %>% pull(gene_id)
+      filtered_list[[paste0(id, ".dn")]] <- tmp %>% filter(log2FoldChange_raw < 0) %>% pull(gene_id)
+    }
+  }
+  
+  # Save per-comparison lists 
+  saveRDS(filtered_list, file = file.path(rdata_path, paste0(exp_name, "_DEG_filtered_", comp, "_log2FC.", log2FC_Cutoff, "_FDR.", fdrCutoff, ".rds")))
+  saveRDS(unfiltered_list, file = file.path(rdata_path, paste0(exp_name, "_DEG_unfiltered_", comp, ".rds")))
+  
+  # Export Excel of unfiltered data
+  results_for_excel <- lapply(unfiltered_list, function(df) data.frame(Gene = df$gene_id, df[ , -1]))
+  write_xlsx(results_for_excel, path = file.path(deg_path, paste0(exp_name, "_DEG_unfiltered_", comp, ".xlsx")))
+  
+  # Store into master result containers
+  filtered_results[[comp]] <- filtered_list
+  unfiltered_results[[comp]] <- unfiltered_list
+}
+
+
+saveRDS(filtered_results, file = file.path(rdata_path, paste0(exp_name, "_DEG_filtered_ALL_log2FC.", log2FC_Cutoff, "_FDR.", fdrCutoff, ".rds")))
+saveRDS(unfiltered_results, file = file.path(rdata_path, paste0(exp_name, "_DEG_unfiltered_ALL.rds")))
+```
+
+
+## DEG Summary 
+```{r}
+deg_summary <- list()
+
+for (comparison in names(filtered_results)) {
+  contrast_list <- filtered_results[[comparison]]
+  if (length(contrast_list) == 0) next
+  
+  for (contrast_id in names(contrast_list)) {
+    direction <- ifelse(grepl("\\.up$", contrast_id), "Upregulated", "Downregulated")
+    contrast_base <- sub("\\.(up|dn)$", "", contrast_id)
+    deg_summary[[length(deg_summary) + 1]] <- data.frame(
+      Comparison = comparison,
+      Contrast   = contrast_base,
+      Direction  = direction,
+      NumGenes   = length(contrast_list[[contrast_id]])
+    )
+  }
+}
+
+deg_summary_df <- bind_rows(deg_summary) %>%
+  arrange(Comparison, Contrast, Direction)
+
+# Total DEG count across all contrasts
+total_degs <- sum(deg_summary_df$NumGenes, na.rm = TRUE)
+
+# CSV
+save_csv(deg_summary_df, path = file.path(deg_path, paste0(exp_name, "_DEG_summary_log2FC.", log2FC_Cutoff, "_FDR.", fdrCutoff, ".csv")))
+
+# PDF 
+pdf_path <- file.path(deg_path, paste0(exp_name, "_DEG_summary_log2FC.", log2FC_Cutoff,
+         "_FDR.", fdrCutoff, ".pdf"))
+
+title_text <- paste0("DEG Summary | log2FC cutoff = ", log2FC_Cutoff,
+                     " | FDR cutoff = ", fdrCutoff,
+                     " | Total DEGs = ", total_degs)
+
+pdf(pdf_path, width = 8.5, height = 11)
+grid.text(title_text, gp = gpar(fontsize = 16, fontface = "bold"), x = 0.5, y = 0.97)  # centered top
+gridExtra::grid.table(deg_summary_df)
+
+dev.off()
+```
+
+
+
+
+## Metascape Export 
+```{r}
+meta_path <- file.path(deg_path, "Metascape")
+make_subdir(meta_path)
+
+#global background
+all_tested_global <- unique(unlist(
+  lapply(unfiltered_results, function(comp_list) {
+    lapply(comp_list, function(df) df$gene_id)
+  })
+))
+
+for (comp in names(filtered_results)) {
+  comp_lists <- filtered_results[[comp]]   # named vectors for each contrast .up/.dn
+  if (length(comp_lists) == 0) next
+
+  # sanitize: ensure character, drop NA/dup
+  comp_lists <- lapply(comp_lists, function(v) unique(na.omit(as.character(v))))
+
+  # Global background (default):
+  comp_lists[["_BACKGROUND"]] <- all_tested_global
+
+  # Rectangle-ize to a data frame (pad shorter columns with NA)
+  max_len <- max(lengths(comp_lists))
+  df_comp <- tibble::tibble(.rows = max_len)
+  for (nm in names(comp_lists)) {
+    vec <- comp_lists[[nm]]
+    length(vec) <- max_len
+    df_comp[[nm]] <- vec
+  }
+
+  out_csv <- file.path(meta_path, paste0(exp_name, "_", comp, "_for_Metascape.csv"))
+  readr::write_csv(df_comp, out_csv)
+}
+```
+
+
+## --------------------
+# STEP 5: Chromosome Annotation
+Use same bed file that was used to map reads to annotate chromosomes
+- bed file give you chromosome -> tx_id 
+- txi gives you tx_id ->gene_id 
+
+
+## Chromsome Map 
+### Read bed file - chromosome to tx_id mapping then tx_id to gene_id 
+```{r}
+chrom_dir <- file.path(save_dir, paste0("Chromosome Annotations"))
+make_subdir(chrom_dir)
+
+bed_cols <- c("chrom","chromStart","chromEnd","tx_id",
+              "score","strand","thickStart","thickEnd",
+              "itemRgb","blockCount","blockSizes","blockStarts")
+
+genes_bed_raw <- readr::read_tsv(
+  file.path(data_path, "genes.bed"),
+  col_names = bed_cols,
+  comment   = "#",
+  show_col_types = FALSE
+)
+
+# normalize chromosome labels 
+standard_chrs <- c(paste0("chr", 1:22), "chrX", "chrY")
+norm_chr <- function(x) {
+  x <- as.character(x)
+  x <- ifelse(grepl("^chr", x), x, paste0("chr", x)) # add 'chr' if missing
+  x
+}
+
+genes_bed <- genes_bed_raw %>%
+  mutate(chrom = norm_chr(chrom)) %>%
+  filter(chrom %in% standard_chrs) %>%
+  distinct(tx_id, chrom)
+
+# read tsv file - tx_id to gene_id mapping
+tx2gene <- readr::read_tsv(
+  file.path(star_salmon_path, "tx2gene.tsv"),
+  col_names = c("tx_id","gene_id"),
+  show_col_types = FALSE
+) %>%
+  distinct(tx_id, gene_id)
+
+
+#check both 
+cat("tx2gene rows:", nrow(tx2gene), 
+    " unique tx:", dplyr::n_distinct(tx2gene$tx_id), "\n")
+cat("tx in BED & tx2gene:", sum(tx2gene$tx_id %in% genes_bed$tx_id), "\n")
+```
+
+### Build final gene to chrom map
+```{r}
+gene_chrom <- genes_bed %>%
+  dplyr::select(tx_id, chrom) %>%
+  dplyr::left_join(tx2gene, by = "tx_id") %>%
+  dplyr::select(gene_id, chrom) %>%
+  dplyr::distinct()
+
+saveRDS(gene_chrom,
+  file = file.path(rdata_path, paste0(exp_name, "_gene_to_chrom.rds")))
+
+#-- Check genes map to chromosome map --
+# load DEGS
+unfiltered_results <- readRDS( file.path(rdata_path, paste0(exp_name, "_DEG_unfiltered_ALL.rds")))
+filtered_results <- readRDS( file.path(rdata_path, paste0(exp_name, "_DEG_filtered_ALL_log2FC.", log2FC_Cutoff, "_FDR.", fdrCutoff, ".rds")))
+
+# full tested gene universe (unique, non-NA, character)
+all_tested <- unique(na.omit(as.character(unlist(
+  lapply(unfiltered_results, function(comp_list) {
+    lapply(comp_list, function(df) df$gene_id)
+  })
+))))
+
+# check that all genes mapped to chromosomes
+all_degs <- unique(na.omit(as.character(unlist(filtered_results))))
+mapped_tested <- length(intersect(all_tested, gene_chrom$gene_id))
+mapped_degs   <- length(intersect(all_degs,   gene_chrom$gene_id))
+
+cat(sprintf("Tested genes: %d | Mapped: %d (%.1f%%)\n",
+          length(all_tested), mapped_tested, 100 * mapped_tested / max(1, length(all_tested))))
+cat(sprintf("DEGs total:   %d | Mapped: %d (%.1f%%)\n",
+          length(all_degs), mapped_degs, 100 * mapped_degs / max(1, length(all_degs))))
+```
+
+## Annotate DEG list 
+```{r }
+# Annotate DEG list 
+chromosome_results <- lapply(filtered_results, function(day_list) {
+  lapply(day_list, function(gene_vec) {
+    tibble(gene_id = as.character(gene_vec)) %>%
+      dplyr::left_join(gene_chrom, by = "gene_id")
+  })
+})
+
+```
+
+
+### Plot DEGS/ Chrom
+```{r}
+chrom_plots <- list()
+
+# 1. summarize
+chr_counts_df <- summarize_chr_counts(chromosome_results, 
+                                      gene_chrom = gene_chrom, all_tested = all_tested )
+
+# 2. clean up titles
+chr_counts_df_pretty <- prettify_chr_counts(chr_counts_df)
+
+# 3. plot with shared axis 
+chrom_plots$facet_updown <- plot_chr_updown( chr_counts_df_pretty,
+  save_dir = chrom_dir, mode = "facet")
+
+# 4. up/down indiv graphs by day
+chrom_plots$updown_day <- plot_chr_updown( chr_counts_df_pretty, save_dir = chrom_dir, mode = "individual")
+```
+
+
+## Total DEGs per chrosmome/day
+```{r}
+
+total_ratio_df <- summarize_total_ratio(chr_counts_df)
+chrom_plots$total_byday <-plot_total_ratio_by_chrom_and_day(total_ratio_df, save_dir = chrom_dir, annotation_colors = annotation_colors)
+
+```
+
+## Save all
+```{r}
+
+saveRDS( chrom_plots,
+  file = file.path(rdata_path, paste0(exp_name, "_chromosome_plots.rds")))
+
+saveRDS(chr_counts_df_pretty, file = file.path(rdata_path, paste0(exp_name, "_chr_counts_pretty.rds")))
+
+saveRDS(total_ratio_df, file = file.path(rdata_path, paste0(exp_name, "_total_ratio_df.rds")))
+
+```
+
+
+## Check for sex 
+```{r}
+sex_qc <- make_sex_qc(vsd_mat, metadata, line_name = exp_name)
+
+sex_qc$plot
+sex_qc$predicted_sex
+
+outfile <- file.path(chrom_dir, paste0(exp_name, "_sexQC.pdf"))
+
+ggsave(outfile, sex_qc$plot, width = 6, height = 5, dpi = 300)
+
+```
+

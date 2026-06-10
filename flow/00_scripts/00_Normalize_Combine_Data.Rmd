@@ -1,0 +1,214 @@
+---
+title: "01: Normalize and Combine All Experiments"
+date: "2026-02-02"
+params:                              
+  experiment_id: S3_COMB
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE  
+---
+
+COMBINED FLOW DATA FOR SET3
+
+## **SETUP**
+##### Load Libraries
+```{r libraries, message=FALSE, warning=FALSE}
+# UPDATED:
+# 2026-02-09 14:41 SAB ------------------------------
+
+library(here)
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(ggpubr)
+library(ggthemes)
+library(stringr) 
+library(janitor)
+
+```
+
+##### Define Variables
+```{r define pathes}
+exp_name <- params$experiment_id
+data_path <- here("flow", "01_data")
+results_path <- here("flow", "02_results")
+rdata_path <- here("flow", "03_rdata")
+
+source(here("flow", "00_scripts", "flow_functions.R"))
+```
+
+
+```{r define customizations}
+color_map <- data.frame(
+  Group = c("CTRL", "SAG", "VIS", "RA", "RA_SAG", "RA_VIS"),
+  Color = c("#999999", "#0072B2", "#E69F00", "#D55E00", "#56B4E9", "#009E73")
+)
+
+treatment_order <- color_map$Group
+
+measurements <- tibble(
+  measurement = c("dbl_neg", "isl_pos", "islctnt_pos", "ctnt_pos", "tot_isl", "tot_ctnt"),
+  measurement_label = c("Double Negative", "Islet+", "Islet+ and cTnT+", "cTnT+", "Total Islet1+", "Total cTnT+")
+)
+
+#save to load and use later
+save(
+  color_map, treatment_order, measurements, 
+  file = file.path(rdata_path, paste0(exp_name, "_customization_data.RData")))
+```
+
+
+
+## STEP1: Load  and Inspect Data
+```{r import and inspect}
+SAB01 <- read.csv(file.path(data_path, "SAB01_flow_dataFinal.csv"))
+SAB04 <- read.csv(file.path(data_path, "SAB04_flow_dataFinal.csv"))
+SAB08 <- read.csv(file.path(data_path, "SAB08_flow_dataFinal.csv"))
+
+SAB01
+SAB04
+SAB08
+```
+
+
+```{r import and inspect}
+# ISLET expression by day and treatment
+ggboxplot(data, x = "day", y = "tot_isl", color = "cell", ylab = "Expression", xlab = "Day") + 
+  facet_grid(. ~ treatment, labeller = label_both)
+
+# CTNT expression by day and treatment
+ggboxplot(data, x = "day", y = "tot_ctnt", color = "cell", ylab = "Expression", xlab = "Day") + 
+  facet_grid(. ~ treatment, labeller = label_both)
+
+```
+
+## STEP 2: Clean Data
+
+##### Transform Data 
+Check your data before running *** 
+Only run % change if percentages were saved as decimals in Excel (e.g., 0.45 instead of 45)
+```{r convert decimals to percent values}
+
+data <- data %>%
+  mutate(
+    across(all_of(measurements$measurement), ~ .x * 100),  # convert decimal % to actual %
+    treatment = toupper(treatment),                            
+    day_lb = toupper(day_lb),
+    cell = toupper(cell),
+    set = str_extract(cell, "^S\\d"),                    # extract "S2", "S3"
+    genotype = str_extract(cell, "D21|T21"),             # extract "D21" or "T21"
+    genotype = factor(genotype, levels = c("D21", "T21")),  # enforce order
+    set = factor(set, levels = unique(set))
+  )
+
+data
+```
+
+## STEP 3: Reshape Data for Plots
+Pivot data to long format for ggplot and statistical analysis
+```{r long form}
+
+long_data <- data %>%
+  pivot_longer(
+    cols = all_of(measurements$measurement), 
+    names_to = "measurement",
+    values_to = "value"
+  ) %>%
+ left_join(measurements, by = "measurement") %>%
+  mutate(  
+     # Factor  for  order in graph
+    measurement = factor(measurement, levels = measurements$measurement),        
+    measurement_label = factor(
+      measurement_label,
+      levels = measurements$measurement_label[match(measurements$measurement, measurements$measurement)]),
+    treatment = factor(treatment, levels = treatment_order),
+    genotype = factor(genotype, levels = c("D21", "T21")),
+    set = factor(set, levels = unique(set))
+  )
+
+long_data
+```
+
+
+## STEP 4: Summary Statistics
+##### Produce summary stats for each measurment
+```{r sumstats}
+measurement_names <- measurements$measurement
+
+results_list <- list() 
+
+for (m in measurement_names) {
+  summary_data <- data %>%
+    group_by(cell, day, treatment) %>%
+    summarise(
+      n    = sum(!is.na(.data[[m]])),        # count non-NA values
+      mean = mean(.data[[m]], na.rm = TRUE),
+      sd   = sd(.data[[m]], na.rm = TRUE),
+      sem  = sd / sqrt(n), 
+      .groups = "drop"
+    ) %>%
+    mutate(measurement = m)  # track which measurement it is
+  
+  results_list[[m]] <- summary_data
+}
+
+# Create lookup table from long_data
+treatment_lookup <- long_data %>%
+  select(treatment, treatment_label) %>%
+  distinct()
+
+# After binding all measurements together
+sumstats_all <- bind_rows(results_list) %>%
+  left_join(treatment_lookup, by = "treatment") %>%
+  mutate(
+    genotype = str_extract(cell, "D21|T21"),
+    set = str_extract(cell, "^S\\d")
+  ) %>%
+  left_join(measurements, by = "measurement") %>%
+  mutate(
+    measurement_label = factor(measurement_label, levels = measurements$measurement_label),
+    measurement       = factor(measurement, levels = measurements$measurement),
+    treatment         = factor(treatment, levels = treatment_order),
+    genotype          = factor(genotype, levels = c("D21", "T21")),
+    set               = factor(set, levels = unique(set)),
+    treatment_label   = factor(treatment_label, levels = unique(treatment_lookup$treatment_label)) # optional: keep order consistent
+  )
+
+print(sumstats_all)
+```
+
+##### SAVE DATA
+```{r save data}
+
+save_csv(data,        path = file.path(data_path, paste0(exp_name, "_flow_dataFinal.csv")))
+save_csv(long_data,   path = file.path(data_path, paste0(exp_name, "_flow_longdata.csv")))
+save_csv(sumstats_all, path = file.path(data_path, paste0(exp_name, "_flow_sumstats.csv")))
+
+save(data, long_data, sumstats_all, 
+  file = file.path(rdata_path, paste0(exp_name, "_flow_data.RData")))
+
+```
+
+#### Plot with all measurments
+```{r all measurments }
+
+bargraph.all<- ggplot(sumstats_all, aes(x = interaction(day), y = mean, fill = cell)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.2, position = position_dodge(0.9)) +
+  facet_grid(measurement_label ~ treatment, scales = "free_y") + 
+  labs(title = paste0("All Flow Measurements - ", exp_name),
+       x = "Day",
+       y = NULL,
+       fill = "Cell Type") +
+  theme_pub() +
+  theme(panel.grid.major = element_line(colour = "#fafafa"))
+
+ggsave( filename = paste0(exp_name, "_all_measurements.pdf"),
+  plot = bargraph.all, path = results_path,
+  height = 11, width = 10, units = "in", bg = "transparent")
+
+```

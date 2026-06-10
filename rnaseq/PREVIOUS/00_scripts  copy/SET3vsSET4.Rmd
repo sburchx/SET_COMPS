@@ -1,0 +1,150 @@
+---
+title: "01: SET3vsSET4"
+params:                              
+  experiment_id: SAB01_SAB08
+  run_date: 2025-02-15
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE     
+
+---
+
+
+## ---------
+##  Setup
+```{r libraries and avariables, message=FALSE}
+library(dplyr)
+library(readr)
+library(stringr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(here)
+
+
+#exp_name <- params$experiment_id
+data_path <- here("rnaseq", "01_data")
+results_path <- here("rnaseq", "02_results")
+rdata_path <- here("rnaseq", "03_rdata")
+
+source(here("rnaseq", "00_scripts", "ScatterPlotFunctions.R"))
+
+out_dir <- file.path(results_path, "Scatterplots2")
+make_subdir(out_dir)
+
+save_dir <- file.path(out_dir, "SET3 vs SET4")
+make_subdir(save_dir)
+
+```
+
+```{r load gene lists}
+SAB01_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_DEG_unfiltered_ALL.rds")
+SAB08_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB08/rnaseq/03_rdata/SAB08_DEG_unfiltered_ALL.rds")
+
+head(names(SAB01_all), 20)
+head(names(SAB08_all), 20)
+
+my_contrasts <- c(
+  "T21_CTRL_vs_D21_CTRL",
+  "T21_RA_vs_D21_RA",
+  "D21_RA_vs_D21_CTRL",
+  "T21_RA_vs_T21_CTRL"
+)
+```
+```{r}
+run_scatter_between_sets <- function(all_list_x, all_list_y,
+                                     contrast,
+                                     days = NULL,
+                                     label_x = "SET3", label_y = "SET4",
+                                     exp_label = "SAB01_vs_SAB08",
+                                     log_cut = 0.5, p_cut = 0.05,
+                                     color_by = "DEG", autoprin = TRUE,
+                                     out_dir,
+                                     show_cor = TRUE, show_fit = TRUE) {
+
+  # If days not provided, use overlap
+  if (is.null(days)) {
+    dx <- get_days_for_contrast(all_list_x, contrast)
+    dy <- get_days_for_contrast(all_list_y, contrast)
+    days <- intersect(dx, dy)
+  }
+
+  if (length(days) == 0) {
+    message("No shared days for ", contrast, " between ", label_x, " and ", label_y)
+    return(invisible(NULL))
+  }
+
+  for (d in days) {
+
+    key <- build_inner_key(contrast, d)
+
+    if (is.null(all_list_x[[contrast]][[key]]) || is.null(all_list_y[[contrast]][[key]])) {
+      message("Skipping ", d, " (missing key in one set).")
+      next
+    }
+
+    df_x <- prep_for_scatter(all_list_x[[contrast]][[key]])
+    df_y <- prep_for_scatter(all_list_y[[contrast]][[key]])
+
+    # plotScatterAnalysis requires df1/df2 as object names
+    var_x <- paste0(exp_label, "_", d, "_X")
+    var_y <- paste0(exp_label, "_", d, "_Y")
+    assign(var_x, df_x, envir = .GlobalEnv)
+    assign(var_y, df_y, envir = .GlobalEnv)
+
+    md <- list()
+    md[[var_x]] <- paste0(label_x, " ", d, " ", gsub("_", " ", contrast))
+    md[[var_y]] <- paste0(label_y, " ", d, " ", gsub("_", " ", contrast))
+
+    p <- plotScatterAnalysis(
+      df1 = var_x,
+      df2 = var_y,
+      ColorBy = color_by,
+      AutoPrint = autoprin,
+      label_genes = character(0),
+      logCutoff = log_cut,
+      pvalCutoff = p_cut,
+      Metadata = md,
+      out_dir = out_dir,
+      ReturnDataOnly = FALSE,
+      show_cor = show_cor,
+      show_fit = show_fit
+    )
+
+    safe_ct <- gsub("_vs_", "-vs-", contrast, fixed = TRUE)
+    fn <- file.path(out_dir, paste0(exp_label, "_", d, "_", safe_ct, "_", label_x, "_vs_", label_y, "_scatter.pdf"))
+    ggplot2::ggsave(fn, p, width = 8, height = 5, dpi = 300, bg = "transparent")
+    message("Saved: ", fn)
+  }
+
+  invisible(TRUE)
+}
+```
+
+# Scatterplot 
+```{r}
+for (ct in my_contrasts) {
+  run_scatter_between_sets(
+    all_list_x = SAB01_all,
+    all_list_y = SAB08_all,
+    contrast   = ct,
+    days       = NULL,          # auto overlap
+    label_x    = "SAB01 (SET3)",
+    label_y    = "SAB08 (SET4)",
+    exp_label  = "SET3vsSET4",
+    log_cut    = 0.5,
+    p_cut      = 0.05,
+    color_by   = "DEG",
+    autoprin   = FALSE,
+    out_dir    = save_dir,
+    show_cor   = TRUE,
+    show_fit   = TRUE
+  )
+}
+```
+
+

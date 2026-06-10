@@ -1,0 +1,223 @@
+---
+title: "02: SET3vSET3 Comps"
+params:                              
+  experiment_id: S3vS3
+  run_date: 2025-02-15
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE     
+
+---
+
+##  --- Setup
+```{r libraries and avariables, message=FALSE}
+# LAST UPDATED: 
+# 2025-09-18 SAB ------------------------------
+
+library(dplyr)
+library(readr)
+library(stringr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(here)
+
+
+exp_name <- params$experiment_id
+data_path <- here("rnaseq", "01_data")
+results_path <- here("rnaseq", "02_results")
+rdata_path <- here("rnaseq", "03_rdata")
+
+source(here("rnaseq", "00_scripts", "ScatterPlotFunctions.R"))
+
+head_dir <- file.path(results_path, "Scatterplots")
+make_subdir(head_dir)
+
+out_dir <- file.path(head_dir, "SET3vSET3")
+make_subdir(out_dir)
+
+```
+
+# --- input data
+# SAB01 - SET3 D3, D4, D6, D8, D10 - NT and 1uM RA
+# SAB02 - SET3 (n=2/set) D3, D4, D5 - NT and 1uM RA
+# SAB04 - SET3 D3, D5, D7 - NT and 1uM RA
+
+ 
+ RUN:
+1.  SAB01 v SAB02 - OVERLAP D3, D4 
+2.  SAB01 v SAB04  -- OVERLAP D3 
+3.  SAB02 v SAB04  - OVERLAP D3, D5
+ 
+```{r load gene lists}
+SAB01_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_DEG_unfiltered_ALL.rds")
+SAB02_SET3 <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB02/rnaseq/03_rdata/SET3/SAB02_SET3_DEG_unfiltered_ALL.rds")
+SAB04_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB04/rnaseq/03_rdata/SAB04_DEG_unfiltered_ALL.rds")
+
+head(names(SAB01_all), 20)
+head(names(SAB02_SET3), 20)
+head(names(SAB04_all), 20)
+
+my_contrasts <- c(
+  "T21_CTRL_vs_D21_CTRL",
+  "T21_RA_vs_D21_RA",
+  "D21_RA_vs_D21_CTRL",
+  "T21_RA_vs_T21_CTRL"
+)
+```
+
+Helper functions to pull data needed for function
+```{r helper functions}
+
+# 1. Build the inner list key: "<GENO>_<DAY>_<TREAT>_vs_<GENO>_<DAY>_<TREAT>"
+get_days_for_contrast <- function(all_list, contrast) {
+  if (is.null(all_list[[contrast]])) return(character(0))
+  nms <- names(all_list[[contrast]])
+  # Extract day tokens that appear BETWEEN underscores, e.g., "_D3_"
+  days <- unique(unlist(regmatches(nms, gregexpr("(?<=_)D\\d+(?=_)", nms, perl = TRUE))))
+  days
+}
+
+has_pair <- function(all_list, contrast, inner_key) {
+  !is.null(all_list[[contrast]]) && !is.null(all_list[[contrast]][[inner_key]])
+} 
+
+build_inner_key <- function(contrast, day) {
+  sides <- strsplit(contrast, "_vs_", fixed = TRUE)[[1]]
+  make_side <- function(side) {
+    parts <- strsplit(side, "_", fixed = TRUE)[[1]]
+    paste0(parts[1], "_", day, "_", paste(parts[-1], collapse = "_"))
+  }
+  paste0(make_side(sides[1]), "_vs_", make_side(sides[2]))
+}
+
+# 2. DESeq2 results table with required columns for function
+prep_for_scatter <- function(x) {
+  df <- as.data.frame(x)
+  if (!"gene_id" %in% names(df)) df <- tibble::rownames_to_column(df, "gene_id")
+  lfc_col <- dplyr::case_when(
+    "log2FoldChange"     %in% names(df) ~ "log2FoldChange",
+    "log2FC"             %in% names(df) ~ "log2FC",
+    "log2FoldChange_raw" %in% names(df) ~ "log2FoldChange_raw",
+    TRUE ~ NA_character_
+  )
+  padj_col <- dplyr::case_when(
+    "padj"   %in% names(df) ~ "padj",
+    "qvalue" %in% names(df) ~ "qvalue",
+    TRUE ~ NA_character_
+  )
+  if (is.na(lfc_col))  stop("Missing log2FC column.")
+  if (is.na(padj_col)) stop("Missing adjusted p-value column.")
+  dplyr::transmute(df,
+    gene_id = as.character(.data$gene_id),
+    padj = as.numeric(.data[[padj_col]]),
+    log2FoldChange = as.numeric(.data[[lfc_col]])
+  )
+}
+
+# 3. Pull, prep, plot one (contrast × day) pair and save
+run_scatter_pair_nested <- function(contrast, day,
+                                    unfiltered_degs1, unfiltered_degs2,
+                                    proj1_label = "deg1", proj2_label = "deg2",
+                                    log_cut = 0.5, p_cut = 0.05,
+                                    color_by = "DEG", autoprin = TRUE,
+                                    out_dir = getwd()) {
+  inner_key <- build_inner_key(contrast, day)
+
+  ok1 <- has_pair(unfiltered_degs1, contrast, inner_key)
+  ok2 <- has_pair(unfiltered_degs2, contrast, inner_key)
+  if (!ok1 || !ok2) {
+    message("Skipping ", contrast, " ", day, " (",
+            if (!ok1) paste0("missing in ", proj1_label),
+            if (!ok1 && !ok2) " & " else "",
+            if (!ok2) paste0("missing in ", proj2_label), ").")
+    return(invisible(NULL))
+  }
+
+  df1 <- prep_for_scatter(unfiltered_degs1[[contrast]][[inner_key]])
+  df2 <- prep_for_scatter(unfiltered_degs2[[contrast]][[inner_key]])
+
+  var1 <- paste0(proj1_label, "_", day, "_", gsub("[^A-Za-z0-9]", "", contrast))
+  var2 <- paste0(proj2_label, "_", day, "_", gsub("[^A-Za-z0-9]", "", contrast))
+  assign(var1, df1, envir = .GlobalEnv)
+  assign(var2, df2, envir = .GlobalEnv)
+
+  md <- list()
+  md[[var1]] <- paste0(proj1_label, " ", day, " (", gsub("_", " ", contrast), ")")
+  md[[var2]] <- paste0(proj2_label, " ", day, " (", gsub("_", " ", contrast), ")")
+
+  p <- plotScatterAnalysis(
+    df1 = var1, df2 = var2,
+    ColorBy = color_by, AutoPrint = autoprin,
+    label_genes = character(0),
+    logCutoff_vitro = log_cut, logCutoff_vivo = log_cut,
+    pvalCutoff = p_cut, Metadata = md, ReturnDataOnly = FALSE
+  )
+
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  safe_ct <- gsub("_vs_", "-vs-", contrast, fixed = TRUE)
+  fn <- file.path(out_dir, paste0(proj1_label, "_vs_", proj2_label, "_", safe_ct, "_", day, "_scatter.pdf"))
+  ggplot2::ggsave(fn, p, width = 8, height = 5, dpi = 300, bg = "transparent")
+  message("Saved: ", fn)
+  invisible(p)
+}
+
+# 4) Batch runner: give it a vector of days and contrasts, it loops and plots
+run_scatter_auto <- function(unfiltered_degs1, unfiltered_degs2,
+                             contrasts = c("T21_CTRL_vs_D21_CTRL",
+                                           "T21_RA_vs_D21_RA",
+                                           "D21_RA_vs_D21_CTRL",
+                                           "T21_RA_vs_T21_CTRL"),
+                             proj1_label = "degs1", proj2_label = "deg2",
+                             log_cut = 0.5, p_cut = 0.05,
+                             color_by = "DEG", autoprin = TRUE,
+                             out_dir = getwd()) {
+
+  for (ct in contrasts) {
+    days01 <- get_days_for_contrast(unfiltered_degs1, ct)
+    days06 <- get_days_for_contrast(unfiltered_degs2, ct)
+    overlap <- intersect(days01, days06)
+
+    if (length(overlap) == 0) {
+      message("No common days for ", ct, " — skipping.")
+      next
+    }
+
+    message("Contrast ", ct, " → days: ", paste(overlap, collapse = ", "))
+    for (dy in overlap) {
+      run_scatter_pair_nested(
+        contrast = ct, day = dy,
+        unfiltered_degs1 = unfiltered_degs1, unfiltered_degs2 = unfiltered_degs2,
+        proj1_label = proj1_label, proj2_label = proj2_label,
+        log_cut = log_cut, p_cut = p_cut,
+        color_by = color_by, autoprin = autoprin,
+        out_dir = out_dir
+      )
+    }
+  }
+  invisible(TRUE)
+}
+```
+
+
+# Scatterplot 
+```{r}
+
+run_scatter_auto(
+  unfiltered_degs1 = SAB02_SET3,
+  unfiltered_degs2 = SAB04_all,
+  proj1_label= "SAB02",
+  proj2_label = "SAB04_SET3",
+  out_dir   = out_dir,
+  log_cut   = 0.5,
+  p_cut     = 0.05,
+  color_by  = "DEG",
+  autoprin  = TRUE
+)
+```
+
+

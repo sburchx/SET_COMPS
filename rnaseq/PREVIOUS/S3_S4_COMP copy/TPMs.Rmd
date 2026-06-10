@@ -1,0 +1,277 @@
+---
+title: "TPM Plots"
+params:                              
+  experiment_id: SET_COMPS
+  run_date: 2026-02-18
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE     
+---
+
+
+
+## Set up
+```{r libraries, message=FALSE, warning=FALSE}
+# *Last updated:*
+# 2026-02-18 20:04 SAB ------------------------------
+
+library(here)
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(reshape2)
+library(readxl)
+library(dplyr)
+library(colorspace)
+
+
+results_path <- here("rnaseq", "S3_S4_COMP", "results")
+rdata_path <- "rdata"
+source(here("rnaseq", "S3_S4_COMP", "functions.R"))
+
+save_dir <- file.path(results_path, "TPMs")
+make_subdir(save_dir)
+
+pal_group <- c(
+  "D21_CTRL" = "#999999",
+  "T21_CTRL" = lighten("#999999", 0.5),
+  "D21_RA"   = "#D55E00",
+  "T21_RA"   = lighten("#D55E00", 0.5)
+)
+
+```
+
+
+## -------------------------
+# SAB01 - TPM PLOTS
+##### read TPM file
+```{r TPM}
+tpm_path <- file.path(save_dir, "SAB01 (SET3)")
+make_subdir(tpm_path)
+
+exp_name <- "SAB01"
+
+metadata <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_metadataFinal.rds")
+
+star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/20240412_LH00315_0161_B222TJLLT1-XRS-Pl21-IM-RS54-hg38/star_salmon"
+
+tpm_file  <- file.path(star_salmon_path, "salmon.merged.gene_tpm.tsv")
+tpm_raw <- read_tsv(tpm_file, show_col_types = FALSE)
+
+#  Use gene_id as rownames
+if (!"gene_id" %in% colnames(tpm_raw)) {
+  stop("TPM file is missing required column: gene_id")
+}
+ann_cols <- intersect(c("gene_id","gene_name"), colnames(tpm_raw))
+
+# If  duplicated gene_ids, aggregate to keep a 1:1 gene row
+if (any(duplicated(tpm_raw$gene_id))) {
+  cols_to_agg <- setdiff(colnames(tpm_raw), ann_cols)
+  tpm_raw <- tpm_raw %>%
+    group_by(gene_id) %>%
+    summarize(across(all_of(cols_to_agg), ~ mean(.x, na.rm = TRUE)), .groups = "drop")
+  message("Duplicated gene_ids detected — values aggregated by mean.")
+}
+
+# Build numeric TPM matrix
+tpm <- as.data.frame(tpm_raw)
+rownames(tpm) <- tpm$gene_id
+tpm <- tpm[ , setdiff(colnames(tpm), ann_cols), drop = FALSE]
+tpm <- readr::type_convert(tpm, na = c("", "NA", "NaN")) # Ensure numeric
+
+# align sample names
+meta_samples <- metadata$sampleID
+if (!all(meta_samples %in% colnames(tpm))) {
+  # try stripping "{exp_name}_"
+  tpm_cols_try <- sub(paste0("^", exp_name, "_"), "", colnames(tpm))
+  if (all(meta_samples %in% tpm_cols_try)) {
+    colnames(tpm) <- tpm_cols_try
+    message("Stripped experiment prefix from TPM column names for alignment.")
+  } else {
+    stop("TPM column names do not match metadata$sampleID, even after cleaning.\n",
+         "First TPM cols: ", paste(head(colnames(tpm)), collapse = ", "), "\n",
+         "First metadata IDs: ", paste(head(meta_samples), collapse = ", "))
+  }
+}
+
+# reorder to match metadata
+tpm <- tpm[, meta_samples, drop = FALSE]
+if (!identical(colnames(tpm), meta_samples)) {
+  stop("TPM columns could not be reordered to match metadata$sampleID order.")
+}
+
+#assess coverage
+missing_in_tpm <- setdiff(meta_samples, colnames(tpm))
+extra_in_tpm   <- setdiff(colnames(tpm), meta_samples)
+
+if (length(missing_in_tpm)) {
+  warning("Samples present in metadata but missing from TPMs: ",
+          paste(missing_in_tpm, collapse = ", "))
+}
+
+if (length(extra_in_tpm)) {
+  message("Extra TPM columns not present in metadata (will be ignored): ",
+          paste(extra_in_tpm, collapse = ", "))
+}
+
+```
+
+
+## Run function
+```{r }
+data_path <- here("rnaseq", "S3_S4_COMP", "results", "D4")
+labels_xlsx <- file.path(data_path, "S3_S4_COMP_D4_crossContrast_overlap_2026-02-18.xlsx")
+sheets <- c("Shared", "Only_T21RA_vs_D21RA")
+
+for (sh in sheets) {
+
+  out_dir <- file.path(tpm_path, sh)  
+  make_subdir(out_dir)
+
+  df <- readxl::read_excel(labels_xlsx, sheet = sh)
+  names(df) <- tolower(gsub("\\s+", "_", names(df)))
+
+  if (!"gene" %in% names(df)) {
+    stop("Sheet ", sh, " is missing a 'gene' column")
+  }
+
+  genes <- df %>%
+    dplyr::filter(!is.na(gene) & gene != "") %>%
+    dplyr::pull(gene) %>%
+    unique()
+
+  present <- genes[genes %in% rownames(tpm)]
+  missing <- setdiff(genes, present)
+
+  if (length(missing)) {
+    message("(", sh, ") TPM missing ", length(missing),
+            " genes (showing up to 10): ",
+            paste(head(missing, 10), collapse = ", "))
+  }
+
+  plot_TPM_for_genes(genes_of_interest = present, tpm = tpm,metadata = metadata,  
+    out_dir = out_dir, log10_y = FALSE, pal_group = pal_group
+  )
+}
+```
+
+
+## -------------------------
+# SAB08 - TPM PLOTS
+##### read TPM file
+```{r TPM}
+tpm_path <- file.path(save_dir, "SAB08 (SET4)")
+make_subdir(tpm_path)
+
+exp_name <- "SAB08"
+
+metadata <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB08/rnaseq/03_rdata/SAB08_metadataFinal.rds")
+
+star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/SAB08/star_salmon"
+
+
+tpm_file  <- file.path(star_salmon_path, "salmon.merged.gene_tpm.tsv")
+tpm_raw <- read_tsv(tpm_file, show_col_types = FALSE)
+
+#  Use gene_id as rownames
+if (!"gene_id" %in% colnames(tpm_raw)) {
+  stop("TPM file is missing required column: gene_id")
+}
+ann_cols <- intersect(c("gene_id","gene_name"), colnames(tpm_raw))
+
+# If  duplicated gene_ids, aggregate to keep a 1:1 gene row
+if (any(duplicated(tpm_raw$gene_id))) {
+  cols_to_agg <- setdiff(colnames(tpm_raw), ann_cols)
+  tpm_raw <- tpm_raw %>%
+    group_by(gene_id) %>%
+    summarize(across(all_of(cols_to_agg), ~ mean(.x, na.rm = TRUE)), .groups = "drop")
+  message("Duplicated gene_ids detected — values aggregated by mean.")
+}
+
+# Build numeric TPM matrix
+tpm <- as.data.frame(tpm_raw)
+rownames(tpm) <- tpm$gene_id
+tpm <- tpm[ , setdiff(colnames(tpm), ann_cols), drop = FALSE]
+tpm <- readr::type_convert(tpm, na = c("", "NA", "NaN")) # Ensure numeric
+
+# align sample names
+meta_samples <- metadata$sampleID
+if (!all(meta_samples %in% colnames(tpm))) {
+  # try stripping "{exp_name}_"
+  tpm_cols_try <- sub(paste0("^", exp_name, "_"), "", colnames(tpm))
+  if (all(meta_samples %in% tpm_cols_try)) {
+    colnames(tpm) <- tpm_cols_try
+    message("Stripped experiment prefix from TPM column names for alignment.")
+  } else {
+    stop("TPM column names do not match metadata$sampleID, even after cleaning.\n",
+         "First TPM cols: ", paste(head(colnames(tpm)), collapse = ", "), "\n",
+         "First metadata IDs: ", paste(head(meta_samples), collapse = ", "))
+  }
+}
+
+# reorder to match metadata
+tpm <- tpm[, meta_samples, drop = FALSE]
+if (!identical(colnames(tpm), meta_samples)) {
+  stop("TPM columns could not be reordered to match metadata$sampleID order.")
+}
+
+#assess coverage
+missing_in_tpm <- setdiff(meta_samples, colnames(tpm))
+extra_in_tpm   <- setdiff(colnames(tpm), meta_samples)
+
+if (length(missing_in_tpm)) {
+  warning("Samples present in metadata but missing from TPMs: ",
+          paste(missing_in_tpm, collapse = ", "))
+}
+
+if (length(extra_in_tpm)) {
+  message("Extra TPM columns not present in metadata (will be ignored): ",
+          paste(extra_in_tpm, collapse = ", "))
+}
+
+```
+
+
+## Run function
+```{r }
+data_path <- here("rnaseq", "S3_S4_COMP", "results", "D4")
+labels_xlsx <- file.path(data_path, "S3_S4_COMP_D4_crossContrast_overlap_2026-02-18.xlsx")
+sheets <- c("Shared", "Only_T21RA_vs_D21RA")
+
+for (sh in sheets) {
+
+  out_dir <- file.path(tpm_path, sh)  
+  make_subdir(out_dir)
+
+  df <- readxl::read_excel(labels_xlsx, sheet = sh)
+  names(df) <- tolower(gsub("\\s+", "_", names(df)))
+
+  if (!"gene" %in% names(df)) {
+    stop("Sheet ", sh, " is missing a 'gene' column")
+  }
+
+  genes <- df %>%
+    dplyr::filter(!is.na(gene) & gene != "") %>%
+    dplyr::pull(gene) %>%
+    unique()
+
+  present <- genes[genes %in% rownames(tpm)]
+  missing <- setdiff(genes, present)
+
+  if (length(missing)) {
+    message("(", sh, ") TPM missing ", length(missing),
+            " genes (showing up to 10): ",
+            paste(head(missing, 10), collapse = ", "))
+  }
+
+  plot_TPM_for_genes(genes_of_interest = present, tpm = tpm,metadata = metadata,  
+    out_dir = out_dir, log10_y = FALSE, pal_group = pal_group
+  )
+}
+```
+
+

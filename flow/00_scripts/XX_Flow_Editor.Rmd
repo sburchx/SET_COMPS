@@ -1,0 +1,147 @@
+---
+title: "XX_Flow_Editor"
+params:                              
+  experiment_id: SAB01
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE   
+---
+
+```{r}
+library(here)
+
+exp_name <- params$experiment_id
+genotype1 <- "D21"
+genotype2 <- "T21"
+
+date_tag <- format(Sys.Date(), "%Y-%m-%d")
+data_path <- here("flow", "01_data")
+results_path <- here("flow", "02_results")
+rdata_path <- here("flow", "03_rdata")
+
+source(here("flow", "00_scripts", "flow_functions.R"))
+
+save_path <- file.path(results_path, "figure edits")
+make_subdir(save_path)
+```
+
+# D21 vs T21 plots
+```{r D21 vs T21}
+plot_recipes <- readRDS(file.path(rdata_path, paste0(exp_name, "_D21vsT21_plot_recipesD346810.rds")))
+names(plot_recipes)
+
+```
+```{r load plot}
+# Pick a recipe
+plot_to_edit <-"tot_ctnt_RA"
+rec <- plot_recipes[[plot_to_edit]]
+
+# Rebuild
+p <- make_flow_plot(
+  measurement_name = rec$measurement_name,
+  summary_data = rec$summary_data,
+  raw_data = rec$raw_data,
+  treatment_val = rec$treatment_val,
+  folder = rec$folder,
+  exp_name = rec$exp_name,
+  color_map = rec$color_map
+) +
+  scale_fill_manual(name = "D21", values = setNames(color_map$Color, color_map$Group), labels = c("")) +
+  scale_color_manual(name = "T21", values = setNames(color_map$Color, color_map$Group), labels = c(""))
+
+# Annotate
+p_annot <- add_pairwise_annotation(
+  plot = p,
+  stats_data = pairwise_stats,
+  measurement = rec$measurement_name,
+  group_col = "genotype", stratify_by = "treatment",
+  stratify_level = rec$treatment_val,
+  show_pval = TRUE, show_effect = FALSE)
+
+p_annot
+```
+```{r edits}
+
+p_edit <- p_annot +
+  labs(y = "% cTnT⁺ Cells (of Total)", x = "Day") +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 12)
+  )
+p_edit
+
+out_file <- file.path(save_path,
+  paste0(exp_name, "_", plot_to_edit, "edited_", date_tag, ".pdf"))
+ggsave(out_file, plot = p_edit, width = 5, height = 7, dpi = 600)
+```
+
+#TRT vs CTRL plots 
+```{r TRT vs CTRL}
+plot_recipes <- readRDS(file.path(rdata_path, paste0(exp_name, "_CTRL_vs_RA_plot_recipes.rds")))
+names(plot_recipes)
+```
+
+```{r load plot}
+plot_to_edit <-"isl_pos_D21"
+rec <- plot_recipes[[plot_to_edit]]
+
+p <- make_flow_plot(
+  measurement_name = rec$measurement_name,
+  summary_data = rec$summary_data,
+  raw_data = rec$raw_data,
+  cell_val = rec$cell_val,
+  folder = rec$folder,
+  exp_name = rec$exp_name,
+  color_map = rec$color_map
+)
+
+# Guides override
+if (grepl("D21", rec$cell_val)) {
+  p <- p + 
+    scale_fill_manual(name = NULL, values = setNames(rec$color_map$Color, rec$color_map$Group)) +
+    guides(
+      fill = guide_legend(order = 1, override.aes = list(alpha = 1)),
+      color = "none", alpha = "none"
+    )
+} else if (grepl("T21", rec$cell_val)) {
+  p <- p + 
+    scale_fill_manual(name = NULL, values = setNames(rec$color_map$Color, rec$color_map$Group)) +
+    guides(
+      fill = "none",
+      color = guide_legend(order = 1, override.aes = list(fill = NA)),
+      alpha = "none"
+    )
+}
+
+p_annot <- add_pairwise_annotation(
+  plot = p,
+  stats_data = pairwise_stats,
+  measurement = rec$measurement_name,
+  group_col = rec$group_col,
+  stratify_by = rec$stratify_by,
+  stratify_level = rec$stratify_level,
+  show_pval = rec$show_pval,
+  show_effect = rec$show_effect
+)
+
+p_annot
+```
+
+```{r edits}
+p_edit <- p_annot +
+  labs(y = "% cTnT⁺ Cells (of Total)", x = "Day") +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 12)
+  )
+p_edit
+
+out_file <- file.path(save_path,
+  paste0(exp_name, "_", plot_to_edit, "edited_", date_tag, ".pdf"))
+ggsave(out_file, plot = p_edit, width = 5, height = 7, dpi = 600)
+```
+

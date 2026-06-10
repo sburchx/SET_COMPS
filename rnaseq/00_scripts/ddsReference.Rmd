@@ -1,0 +1,44 @@
+---
+title: "ddsReference"
+output: html_document
+---
+
+#unfiltered DEG gene lists 
+```{r}
+#SAB01 - SET3 D3, D4, D6, D8, D10 - NT and 1uM RA
+SAB01_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_DEG_unfiltered_ALL.rds")
+
+#SAB02 - SET3 and SET2 (n=2/set) D3, D4, D5 - NT, 1uM RA, 1uM SAG and RA+SAG
+SAB02_SET2 <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB02/rnaseq/03_rdata/SET2/SAB02_SET2_DEG_unfiltered_ALL.rds")
+SAB02_SET3 <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB02/rnaseq/03_rdata/SET3/SAB02_SET3_DEG_unfiltered_ALL.rds")
+
+#SAB04 - SET3 D3, D5, D7 - NT, 1uM RA, 500nM VIS and RA+VIS
+SAB04_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB04/rnaseq/03_rdata/SAB04_DEG_unfiltered_ALL.rds")
+
+#SAB06 - SET2 D3, D4, D5, D7 - NT and RA
+SAB06_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB06/rnaseq/03_rdata/SAB06_DEG_unfiltered_ALL.rds")
+```
+
+
+```{r star salmon paths}
+
+# -- SET 3 -- 
+SAB01_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/20240412_LH00315_0161_B222TJLLT1-XRS-Pl21-IM-RS54-hg38/star_salmon"
+
+# -- SET 4 -- 
+SAB08_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/SAB08/star_salmon"
+
+# -- SET 2 -- 
+
+
+```
+
+
+```{r metasheets}
+SAB01_meta <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_metadataFinal.rds")
+
+SAB08_meta <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB08_metadataFinal_outliers_removed.rds")
+
+SAB06_meta <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB06/rnaseq/03_rdata/SAB08_metadataFinal.rds")
+```
+

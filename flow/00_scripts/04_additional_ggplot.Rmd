@@ -1,0 +1,118 @@
+---
+title: "04: Generate any additional ggplots of data"
+experiment_ID: "SAB01"
+date: "2024-11-11"
+author: "Shalise A Burch"
+output: 
+  html_document:
+    code_folding: "hide"  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE    
+    message: FALSE     
+    fig.width: 6       
+    fig.height: 4      
+    chunk_labels: TRUE 
+---
+
+#### Last updated: 04-23-25
+
+# Plot data with ggplot:
+
+STEP 1: Load Data and Customization STEP 2: Generate every combination of plots... :)
+
+## SETUP
+
+```{r libraries}
+
+library(here)
+library(tidyverse)
+library(ggpubr)
+library(ggthemes)
+library(ggplot2)
+library(janitor)
+
+
+```
+
+```{r variables}
+
+exp_name <- "SAB01"
+treatment1 <- "CTRL"
+treatment2 <- "RA"
+
+data_path <- here("flow", "01_data")
+results_path <- here("flow", "02_results")
+rdata_path <- here("flow", "03_rdata")
+
+source(here("flow", "00_scripts", "flow_functions.R"))
+
+```
+
+#### Load Data
+
+```{r data}
+
+load(file.path(rdata_path, paste0(exp_name, "_customization_data.RData")))
+load(file.path(rdata_path, paste0(exp_name, "_flow_data.RData")))
+
+```
+
+# COMBINED GRAPH - D21 + T21, CTRl + RA
+
+```{r sub folder }
+folder_path <- file.path(results_path, "Combined - Cells+Treatments")
+
+if (!dir.exists(folder_path)) {
+  dir.create(folder_path, recursive = TRUE)
+  message(paste("Folder created:", folder_path))
+} else {
+  message(paste("Folder already exists:", folder_path))
+}
+```
+
+```{r}
+# Treatments to compare
+group1 <- "CTRL"
+group2 <- "RA"
+treatments_of_interest <- c(group1, group2)
+
+# Filter to overlapping days
+valid_days <- long_data %>%
+  filter(treatment %in% treatments_of_interest) %>%
+  distinct(day, treatment) %>%
+  count(day) %>%
+  filter(n == length(treatments_of_interest)) %>%
+  pull(day)
+
+message("Overlapping days for ", group1, " and ", group2, ": ", paste(valid_days, collapse = ", "))
+```
+
+```{r}
+# Filter data
+sumstats_filter  <- sumstats_all %>% filter(day %in% valid_days, treatment %in% treatments_of_interest)
+long_data_filter <- long_data     %>% filter(day %in% valid_days, treatment %in% treatments_of_interest)
+
+# Plot loop
+combined_plots <- list()
+
+for (measure in measurements$measurement) {
+  p <- make_flow_plot(
+    measurement_name = measure,
+    summary_data     = sumstats_filter,
+    raw_data         = long_data_filter,
+    folder           = folder_path,
+    exp_name         = exp_name,
+    color_map        = color_map
+  )
+
+  # Save and store
+  ggsave(filename = paste0(exp_name, "_", measure, "_", group1, "_vs_", group2, "_combined.pdf"), 
+         path = folder_path, plot = p, width = 7, height = 8, units = "in", bg = "transparent")
+  
+  combined_plots[[measure]] <- p
+}
+
+saveRDS(combined_plots, file = file.path(folder_path, paste0(exp_name, "_combined_plots.rds")))
+```

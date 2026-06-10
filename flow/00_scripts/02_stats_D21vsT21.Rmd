@@ -1,0 +1,197 @@
+---
+title: "02: Assumptions and Statistical Comparisons -- D21 vs T21 "
+params:                              
+  experiment_id: SAB01
+  author: "Shalise Burch"
+  date: "2024-04-10"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE   
+---
+
+# Analysis overview
+For each day and each measurement:
+    -> Compare T21 vs D21 within each treatment 
+
+** 🔁 Statistical Comparison Workflow – Step-by-Step **
+STEP1: Load Data and customization
+STEP2: Run Statistical Analysis  
+  a) check assumption 
+  - Normality (Shapiro-Wilk)
+  - Homogeneity of variance (Levene’s)
+  b) Statistical Analysis  
+  - t-test or Wilcoxon depending on assumptions
+STEP4: Generate Bar Plots w/ Annotations
+
+
+STEP1: Load Libraries and Data 
+```{r loading libraries, include=FALSE}
+# UPDATED:
+# 2026-01-25 19:06 SAB ------------------------------
+
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(ggpubr)
+library(car)
+library(here)
+library(janitor)
+
+genotype1 <- "D21"
+genotype2 <- "T21"
+exp_name <- params$experiment_id
+
+data_path <- here("flow", "01_data")
+results_path <- here("flow", "02_results")
+rdata_path <- here("flow", "03_rdata")
+
+source(here("flow", "00_scripts", "flow_functions.R"))
+
+save_path <- file.path(results_path, "D21 vs T21")
+make_subdir(save_path)
+
+# load data
+load(file.path(rdata_path, paste0(exp_name,  "_customization_data.RData")))
+load(file.path(rdata_path, paste0(exp_name, "_flow_data.RData")))
+
+```
+
+## ---------------------
+## Statistical Analysis
+#### Assumptions and then stats 
+```{r genotype stats}
+pairwise_stats <- run_pairwise_stats(data = long_data,
+  measurements = measurements, group_var = "genotype", 
+  group1 = genotype1, group2 = genotype2,
+  stratify_var = "treatment", id_var = "exp_no")
+
+save_csv(data = pairwise_stats, path = file.path(save_path, paste0(exp_name, "_stats_D21vT21.csv")))
+
+```
+
+
+## -----------------------------
+## PLOTS with stat annotation
+
+```{r subfolder }
+plots_folder <- file.path(save_path, "Plots")
+make_subdir(plots_folder)
+
+plot_recipes <- list()
+
+for (measure in measurements$measurement) {
+  for (treat_val in unique(long_data$treatment)) {
+    treat_val <- as.character(treat_val)
+
+    p <- make_flow_plot(
+      measurement_name = measure, summary_data = sumstats_all,
+      raw_data = long_data, treatment_val = treat_val,
+      folder = save_path, exp_name = exp_name, color_map = color_map)
+    
+    #remove legend labels 
+    p <- p +
+      scale_fill_manual(name = "D21", values = setNames(color_map$Color, color_map$Group), labels = c("")) +
+    scale_color_manual(name = "T21", values = setNames(color_map$Color, color_map$Group),  labels = c("")) 
+    
+    # Annotate stats — comparing genotype *within* each treatment
+    p_annot <- add_pairwise_annotation(
+      plot = p, stats_data = pairwise_stats,           
+      measurement = measure,
+      group_col = "genotype",                
+      stratify_by = "treatment",             
+      stratify_level = treat_val,
+      show_pval = TRUE, show_effect = TRUE)
+
+    ggsave(filename = paste0(exp_name, "_", measure, "_", treat_val, "_stats.pdf"),
+      plot = p_annot, path = plots_folder,
+      width = 5, height = 7, units = "in"
+    )
+    
+    plot_key <- paste0(measure, "_", treat_val)
+    
+    plot_recipes[[plot_key]] <- list(
+      measurement_name = measure,
+      treatment_val = treat_val,
+      summary_data = sumstats_all,
+      raw_data = long_data,
+      folder = save_path, exp_name = exp_name,
+      color_map = color_map)
+    
+  }
+}
+
+saveRDS(plot_recipes, file = file.path(rdata_path, paste0(exp_name, "_D21vsT21_plot_recipes.rds")))
+
+
+
+```
+
+
+##### CUSTOM ------ 
+```{r}
+days <- c(3,4,6,8,10)
+sumstats_filter  <- sumstats_all %>% filter(day %in% days)
+long_data_filter <- long_data %>% filter(day %in% days)
+
+plots_folder <- file.path(save_path, "Plots - D3,D4,D6,D8,D10")
+make_subdir(plots_folder)
+```
+
+### Generate plots 
+```{r}
+
+plot_recipes <- list()
+
+for (measure in measurements$measurement) {
+  for (treat_val in unique(long_data_filter$treatment)) {
+    treat_val <- as.character(treat_val)
+
+    p <- make_flow_plot(
+      measurement_name = measure, summary_data = sumstats_filter,
+      raw_data = long_data_filter, treatment_val = treat_val,
+      folder = save_path, exp_name = exp_name, color_map = color_map)
+    
+    #remove legend labels 
+    p <- p +
+      scale_fill_manual(name = "D21", values = setNames(color_map$Color, color_map$Group), labels = c("")) +
+    scale_color_manual(name = "T21", values = setNames(color_map$Color, color_map$Group),  labels = c("")) 
+    
+    # Annotate stats — comparing genotype *within* each treatment
+    p_annot <- add_pairwise_annotation(
+      plot = p, stats_data = pairwise_stats,           
+      measurement = measure,
+      group_col = "genotype",                
+      stratify_by = "treatment",             
+      stratify_level = treat_val,
+      show_pval = TRUE, show_effect = TRUE)
+
+    ggsave(filename = paste0(exp_name, "_", measure, "_", treat_val, "_stats.pdf"),
+      plot = p_annot, path = plots_folder,
+      width = 5, height = 7, units = "in"
+    )
+    
+    plot_key <- paste0(measure, "_", treat_val)
+    
+    plot_recipes[[plot_key]] <- list(
+      measurement_name = measure,
+      treatment_val = treat_val,
+      summary_data = sumstats_filter,
+      raw_data = long_data_filter,
+      folder = save_path, exp_name = exp_name,
+      color_map = color_map)
+    
+  }
+}
+
+saveRDS(plot_recipes, file = file.path(rdata_path, paste0(exp_name, "_D21vsT21_plot_recipesD346810.rds")))
+
+
+```
+
+
+
+
+

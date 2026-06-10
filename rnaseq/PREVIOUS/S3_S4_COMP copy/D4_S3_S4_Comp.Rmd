@@ -1,0 +1,463 @@
+---
+title: "Comparing Set 3 to Set 4 - RNAseq Data "
+params:                              
+  experiment_id: S3_S4_COMP
+  author: "Shalise Burch"
+  date: "2026-02-17"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE   
+---
+
+SAB01 -> SET 3
+SAB08 -> SET 4
+
+```{r message=FALSE, warning=FALSE}
+# UPDATED:
+# 2026-02-17 17:07 SAB ------------------------------
+# 2026-02-18 15:48 SAB ------------------------------ rerun with new SAB08 DEGS after combining runs
+
+library(here)
+library(dplyr)
+library(stringr)
+
+exp_name <- params$experiment_id
+results_path <- here("rnaseq", "S3_S4_COMP", "results")
+rdata_path <- here("rnaseq", "S3_S4_COMP", "rdata")
+source(here("rnaseq", exp_name, "functions.R"))
+
+day_use  <- "D4"
+lfc_col <- "log2FoldChange_raw"   
+padj_cut <- 0.05
+lfc_cut  <- 0.5
+
+save_dir <- file.path(results_path, day_use)
+make_subdir(save_dir)
+
+
+#load data 
+SAB01_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_DEG_unfiltered_ALL.rds")
+SAB08_all <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB08/rnaseq/03_rdata/SAB08_DEG_unfiltered_ALL.rds")
+
+```
+
+# D4 T21_RA_vs_D21_RA
+## -- Pull data
+```{r}
+contrast <- "T21_RA_vs_D21_RA"
+
+# SAB01 SET3
+sab01_df <- get_day_df(SAB01_all, contrast, day_use)
+sab01_degs <- filter_deg_genes(sab01_df, padj_cut, lfc_cut, lfc_col)
+
+# SAB08 SET4
+sab08_df <- get_day_df(SAB08_all, contrast, day_use)
+sab08_degs <- filter_deg_genes(sab08_df, padj_cut, lfc_cut, lfc_col)
+```
+
+## -- overlap DEGS 
+```{r}
+overlap_sets <- function(x, y) {
+  list(
+    shared = intersect(x, y),
+    SAB01_only = setdiff(x, y),
+    SAB08_only = setdiff(y, x)
+  )
+}
+
+
+A_all  <- overlap_sets(sab01_degs$all,  sab08_degs$all)
+A_up   <- overlap_sets(sab01_degs$up,   sab08_degs$up)
+A_down <- overlap_sets(sab01_degs$down, sab08_degs$down)
+
+
+#identify  inconsistent genes
+consistent_genes_A <- c(A_up$shared, A_down$shared)
+inconsistent_genes_A <- setdiff(A_all$shared, consistent_genes_A)
+
+#summary table
+summary_table <- tibble::tibble(
+  contrast = contrast,
+  
+  sab01_degs = length(sab01_degs$all),
+  sab08_degs = length(sab08_degs$all),
+  shared_all = length(A_all$shared),
+
+  shared_up = length(A_up$shared), 
+  shared_down = length(A_down$shared)
+)
+
+print(summary_table)
+
+cat("Shared (direction-consistent) at", day_use, ":", length(consistent_genes_A), "\n")
+cat("Shared (inconsistent) at", day_use, ":", length(inconsistent_genes_A), "\n", head(inconsistent_genes_A))
+
+```
+
+```{r}
+out <- list(
+  day = day_use,
+  lfc_col = lfc_col,
+  filters = list(padj_cut = padj_cut, lfc_cut = lfc_cut),
+  A_T21RA_vs_D21RA = list(  all = A_all, up = A_up, down = A_down, consistent = consistent_genes_A, inconsistent = inconsistent_genes_A))
+
+
+file_name <- paste0(exp_name, "_", day_use, "_", contrast, "_overlap_", Sys.Date(), ".rds")
+
+saveRDS(out, file = file.path(rdata_path, file_name))
+```
+
+##-- save data
+```{r excel}
+library(writexl)
+
+excel_list <- list(
+  Summary = summary_table,
+  A_shared_all = data.frame(gene = A_all$shared),
+  A_shared_up = data.frame(gene = A_up$shared),
+  A_shared_down = data.frame(gene = A_down$shared),
+  A_inconsistent = data.frame(gene = inconsistent_genes_A))
+
+excel_file <- file.path(save_dir,
+                         paste0(exp_name, "_", day_use,"_", contrast, "_overlap_summary_", Sys.Date(), ".xlsx"))
+
+write_xlsx(excel_list, excel_file)
+```
+
+
+```{r pdf summary}
+pdf_file <- file.path(,
+                      paste0(exp_name, "_", day_use,"_", contrast, "_overlap_counts_", Sys.Date(), ".pdf"))
+
+pdf(pdf_file, width = 8, height = 6)
+
+plot.new()
+
+text(0.1, 0.9, paste(day_use," DEG Overlap Summary"), adj = 0, cex = 1.4)
+
+text(0.1, 0.8, paste("Contrast:", contrast), adj = 0)
+text(0.1, 0.75, paste("SAB01 DEGs:", length(sab01_degs$all)), adj = 0)
+text(0.1, 0.7, paste("SAB08 DEGs:", length(sab08_degs$all)), adj = 0)
+text(0.1, 0.65, paste("Shared (all):", length(A_all$shared)), adj = 0)
+text(0.1, 0.6, paste("Shared (up):", length(A_up$shared)), adj = 0)
+text(0.1, 0.55, paste("Shared (down):", length(A_down$shared)), adj = 0)
+text(0.1, 0.45, paste("Inconsistent direction:", length(inconsistent_genes_A)), adj = 0)
+
+dev.off()
+```
+
+## -- annotate gene themes
+```{r}
+pathway_sets <- readRDS(file.path(rdata_path, "annot_pathway_sets_v2026.rds"))
+# Chromosome - using gene chrom map used previously
+gene_to_chrom <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_gene_to_chrom.rds")
+
+# Add direction to annotation table
+gene_col <- sab01_degs$gene_col
+
+lfc_table <- sab01_df %>%
+  select(gene = all_of(gene_col),
+         log2FC = log2FoldChange_raw)
+
+annot_table <- data.frame(gene = consistent_genes_A) %>%
+  left_join(lfc_table, by = c("gene" = "gene")) %>%
+  mutate(direction = ifelse(log2FC > 0, "Up_in_T21", "Down_in_T21"))
+
+#chrom annotation
+annot_table <- annot_table %>%
+  left_join(gene_to_chrom, by = c("gene" = "gene_id")) %>%
+  mutate(chr21 = chrom == "chr21")
+#annotated table for pathways and TFs 
+annot_table <- annot_table %>%
+  mutate(
+    RA_core = gene %in% pathway_sets$RA_core,
+    Hedgehog = gene %in% pathway_sets$Hedgehog,
+    WNT = gene %in% pathway_sets$WNT,
+    TGFb = gene %in% pathway_sets$TGFb,
+    Notch = gene %in% pathway_sets$Notch,
+    TF = gene %in% pathway_sets$TF,
+    Chromatin = gene %in% pathway_sets$Chromatin
+  )
+
+
+annot_file <- file.path(,
+  paste0(exp_name, "_", day_use, "_", contrast, "_ANNOTATED.xlsx"))
+
+write_xlsx(list(D4_annotated = annot_table), annot_file)
+```
+
+```{r}
+
+res_T21RA_vs_D21RA <- list(
+  contrast = contrast,
+  sab01_degs = sab01_degs,
+  sab08_degs = sab08_degs,
+  overlap_all = A_all,
+  overlap_up  = A_up,
+  overlap_down = A_down,
+  consistent = consistent_genes_A,
+  inconsistent = inconsistent_genes_A
+)
+
+```
+
+##  Print Summary 
+```{r Summary}
+total_genes <- nrow(annot_table)
+
+cat("\n==============================\n")
+cat(day_use, " Annotation Summary\n")
+cat(contrast, "\n")
+cat("==============================\n\n")
+
+cat("Total Genes:", total_genes, "\n\n")
+
+cat("Direction:\n")
+cat("  Up in T21:   ", sum(annot_table$direction == "Up_in_T21", na.rm = TRUE), "\n")
+cat("  Down in T21: ", sum(annot_table$direction == "Down_in_T21", na.rm = TRUE), "\n\n")
+
+cat("Chromosome:\n")
+cat("  Chr21: ", sum(annot_table$chr21, na.rm = TRUE), "\n\n")
+
+cat("Pathway / Theme Flags:\n")
+cat("  RA_core:   ", sum(annot_table$RA_core, na.rm = TRUE), "\n")
+cat("  Hedgehog:  ", sum(annot_table$Hedgehog, na.rm = TRUE), "\n")
+cat("  WNT:       ", sum(annot_table$WNT, na.rm = TRUE), "\n")
+cat("  TGFb:      ", sum(annot_table$TGFb, na.rm = TRUE), "\n")
+cat("  Notch:     ", sum(annot_table$Notch, na.rm = TRUE), "\n")
+cat("  TF:        ", sum(annot_table$TF, na.rm = TRUE), "\n")
+cat("  Chromatin: ", sum(annot_table$Chromatin, na.rm = TRUE), "\n")
+
+cat("\n==============================\n")
+```
+
+# D4 D21_RA_vs_CTRL
+## -- Pull data
+```{r}
+contrast <- "D21_RA_vs_D21_CTRL"
+
+# SAB01 SET3
+sab01_df <- get_day_df(SAB01_all, contrast, day_use)
+sab01_degs <- filter_deg_genes(sab01_df, padj_cut, lfc_cut, lfc_col)
+
+# SAB08 SET4
+sab08_df <- get_day_df(SAB08_all, contrast, day_use)
+sab08_degs <- filter_deg_genes(sab08_df, padj_cut, lfc_cut, lfc_col)
+```
+
+## -- overlap DEGS 
+```{r}
+overlap_sets <- function(x, y) {
+  list(
+    shared = intersect(x, y),
+    SAB01_only = setdiff(x, y),
+    SAB08_only = setdiff(y, x)
+  )
+}
+
+
+A_all  <- overlap_sets(sab01_degs$all,  sab08_degs$all)
+A_up   <- overlap_sets(sab01_degs$up,   sab08_degs$up)
+A_down <- overlap_sets(sab01_degs$down, sab08_degs$down)
+
+
+#identify  inconsistent genes
+consistent_genes_A <- c(A_up$shared, A_down$shared)
+inconsistent_genes_A <- setdiff(A_all$shared, consistent_genes_A)
+
+#summary table
+summary_table <- tibble::tibble(
+  contrast = contrast,
+  
+  sab01_degs = length(sab01_degs$all),
+  sab08_degs = length(sab08_degs$all),
+  shared_all = length(A_all$shared),
+
+  shared_up = length(A_up$shared), 
+  shared_down = length(A_down$shared)
+)
+
+print(summary_table)
+
+cat("Shared (direction-consistent) at", day_use, ":", length(consistent_genes_A), "\n")
+cat("Shared (inconsistent) at", day_use, ":", length(inconsistent_genes_A), "\n", head(inconsistent_genes_A))
+
+```
+
+```{r}
+out <- list(
+  day = day_use,
+  lfc_col = lfc_col,
+  filters = list(padj_cut = padj_cut, lfc_cut = lfc_cut),
+  A_T21RA_vs_D21RA = list(  all = A_all, up = A_up, down = A_down, consistent = consistent_genes_A, inconsistent = inconsistent_genes_A))
+
+
+file_name <- paste0(exp_name, "_", day_use, "_", contrast, "_overlap_", Sys.Date(), ".rds")
+
+saveRDS(out, file = file.path(rdata_path, file_name))
+```
+
+##-- save data
+```{r excel}
+library(writexl)
+
+excel_list <- list(
+  Summary = summary_table,
+  A_shared_all = data.frame(gene = A_all$shared),
+  A_shared_up = data.frame(gene = A_up$shared),
+  A_shared_down = data.frame(gene = A_down$shared),
+  A_inconsistent = data.frame(gene = inconsistent_genes_A))
+
+excel_file <- file.path(,
+                         paste0(exp_name, "_", day_use,"_", contrast, "_overlap_summary_", Sys.Date(), ".xlsx"))
+
+write_xlsx(excel_list, excel_file)
+```
+
+
+```{r pdf summary}
+pdf_file <- file.path(,
+                      paste0(exp_name, "_", day_use,"_", contrast, "_overlap_counts_", Sys.Date(), ".pdf"))
+
+pdf(pdf_file, width = 8, height = 6)
+
+plot.new()
+
+text(0.1, 0.9, paste(day_use," DEG Overlap Summary"), adj = 0, cex = 1.4)
+
+text(0.1, 0.8, paste("Contrast:", contrast), adj = 0)
+text(0.1, 0.75, paste("SAB01 DEGs:", length(sab01_degs$all)), adj = 0)
+text(0.1, 0.7, paste("SAB08 DEGs:", length(sab08_degs$all)), adj = 0)
+text(0.1, 0.65, paste("Shared (all):", length(A_all$shared)), adj = 0)
+text(0.1, 0.6, paste("Shared (up):", length(A_up$shared)), adj = 0)
+text(0.1, 0.55, paste("Shared (down):", length(A_down$shared)), adj = 0)
+text(0.1, 0.45, paste("Inconsistent direction:", length(inconsistent_genes_A)), adj = 0)
+
+dev.off()
+```
+
+## -- annotate gene themes
+```{r}
+pathway_sets <- readRDS(file.path(rdata_path, "annot_pathway_sets_v2026.rds"))
+# Chromosome - using gene chrom map used previously
+gene_to_chrom <- readRDS("/Users/shalise/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_gene_to_chrom.rds")
+
+# Add direction to annotation table
+gene_col <- sab01_degs$gene_col
+
+lfc_table <- sab01_df %>%
+  select(gene = all_of(gene_col),
+         log2FC = log2FoldChange_raw)
+
+annot_table <- data.frame(gene = consistent_genes_A) %>%
+  left_join(lfc_table, by = c("gene" = "gene")) %>%
+  mutate(direction = ifelse(log2FC > 0, "Up_in_RA", "Down_in_RA"))
+
+#chrom annotation
+annot_table <- annot_table %>%
+  left_join(gene_to_chrom, by = c("gene" = "gene_id")) %>%
+  mutate(chr21 = chrom == "chr21")
+#annotated table for pathways and TFs 
+annot_table <- annot_table %>%
+  mutate(
+    RA_core = gene %in% pathway_sets$RA_core,
+    Hedgehog = gene %in% pathway_sets$Hedgehog,
+    WNT = gene %in% pathway_sets$WNT,
+    TGFb = gene %in% pathway_sets$TGFb,
+    Notch = gene %in% pathway_sets$Notch,
+    TF = gene %in% pathway_sets$TF,
+    Chromatin = gene %in% pathway_sets$Chromatin
+  )
+
+
+annot_file <- file.path(,
+  paste0(exp_name, "_", day_use, "_", contrast, "_ANNOTATED.xlsx"))
+
+write_xlsx(list(D4_annotated = annot_table), annot_file)
+```
+
+```{r}
+
+res_D21RA_vs_CTRL <- list(
+  contrast = contrast,
+  sab01_degs = sab01_degs,
+  sab08_degs = sab08_degs,
+  overlap_all = A_all,
+  overlap_up  = A_up,
+  overlap_down = A_down,
+  consistent = consistent_genes_A,
+  inconsistent = inconsistent_genes_A
+)
+
+```
+
+##  Print Summary 
+```{r Summary}
+total_genes <- nrow(annot_table)
+
+cat("\n==============================\n")
+cat(day_use, " Annotation Summary\n")
+cat(contrast, "\n")
+cat("==============================\n\n")
+
+cat("Total Genes:", total_genes, "\n\n")
+
+cat("Direction:\n")
+cat("  Up in RA:   ", sum(annot_table$direction == "Up_in_RA", na.rm = TRUE), "\n")
+cat("  Down in RA: ", sum(annot_table$direction == "Down_in_RA", na.rm = TRUE), "\n\n")
+
+cat("Chromosome:\n")
+cat("  Chr21: ", sum(annot_table$chr21, na.rm = TRUE), "\n\n")
+
+cat("Pathway / Theme Flags:\n")
+cat("  RA_core:   ", sum(annot_table$RA_core, na.rm = TRUE), "\n")
+cat("  Hedgehog:  ", sum(annot_table$Hedgehog, na.rm = TRUE), "\n")
+cat("  WNT:       ", sum(annot_table$WNT, na.rm = TRUE), "\n")
+cat("  TGFb:      ", sum(annot_table$TGFb, na.rm = TRUE), "\n")
+cat("  Notch:     ", sum(annot_table$Notch, na.rm = TRUE), "\n")
+cat("  TF:        ", sum(annot_table$TF, na.rm = TRUE), "\n")
+cat("  Chromatin: ", sum(annot_table$Chromatin, na.rm = TRUE), "\n")
+
+cat("\n==============================\n")
+```
+
+
+# Overlap 
+```{r}
+contrast_overlap <- overlap_sets(
+  res_T21RA_vs_D21RA$consistent,
+  res_D21RA_vs_CTRL$consistent
+)
+
+cat("\n==============================\n")
+cat(day_use, "CROSS-CONTRAST OVERLAP (consistent genes)\n")
+cat("==============================\n")
+cat("Shared:", length(contrast_overlap$shared), "\n")
+cat("Only genotype-effect (T21RA vs D21RA):", length(contrast_overlap$SAB01_only), "\n")
+cat("Only RA-response in D21 (D21RA vs CTRL):", length(contrast_overlap$SAB08_only), "\n")
+cat("Example shared genes:\n")
+print(head(contrast_overlap$shared, 30))
+
+```
+```{r}
+
+cross_excel <- list(
+  Summary = tibble::tibble(
+    contrast1 = res_T21RA_vs_D21RA$contrast,
+    contrast2 = res_D21RA_vs_CTRL$contrast,
+    n1 = length(res_T21RA_vs_D21RA$consistent),
+    n2 = length(res_D21RA_vs_CTRL$consistent),
+    shared = length(contrast_overlap$shared)
+  ),
+  Shared = data.frame(gene = contrast_overlap$shared),
+  Only_T21RA_vs_D21RA = data.frame(gene = contrast_overlap$SAB01_only),
+  Only_D21RA_vs_CTRL  = data.frame(gene = contrast_overlap$SAB08_only))
+
+write_xlsx(cross_excel,
+  file.path(, paste0(exp_name, "_", day_use, "_crossContrast_overlap_", Sys.Date(), ".xlsx")))
+
+```
+

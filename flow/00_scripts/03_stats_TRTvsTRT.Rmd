@@ -1,0 +1,186 @@
+---
+title: "02: Assumptions and Statistical Comparisons -- D21 vs T21 "
+date: "2024-04-10"
+params:                              
+  experiment_id: SAB01
+  author: "Shalise Burch"
+output: html_document  
+knitr:
+  opts_chunk:
+    echo: TRUE        
+    warning: FALSE     
+    message: FALSE   
+---
+
+# Analysis overview
+For each day and each measurement:
+    -> Compare CTRL vs RA within each genotype 
+
+** 🔁 Statistical Comparison Workflow – Step-by-Step **
+STEP1: Setup
+  a) Load Libraries
+  b) Set Variables 
+  c) Load Data
+STEP2: Run Statistical Analysis  
+  a) check assumption 
+  - Normality (Shapiro-Wilk)
+  - Homogeneity of variance (Levene’s)
+  b) Statistical Analysis  
+  - t-test or Wilcoxon depending on assumptions
+STEP4: Generate Bar Plots w/ Annotations
+
+
+## Setup 
+```{r loading libraries, include=FALSE}
+# UPDATED:
+# 2026-01-25 19:06 SAB ------------------------------
+
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(ggpubr)
+library(car)
+library(here)
+library(janitor)
+
+exp_name <- params$experiment_id
+data_path <- here("flow", "01_data")
+results_path <- here("flow", "02_results")
+rdata_path <- here("flow", "03_rdata")
+
+source(here("flow", "00_scripts", "flow_functions.R"))
+
+load(file.path(rdata_path, paste0(exp_name, "_customization_data.RData")))
+load(file.path(rdata_path, paste0(exp_name, "_flow_data.RData")))
+
+```
+
+
+### Filter data if needed
+```{r filter data}
+group1 <- "CTRL"
+group2 <- "RA"
+comparison <- paste0(group1, "_vs_", group2)
+
+save_path <- file.path(results_path, comparison)
+make_subdir(save_path)
+
+filtered_data <- long_data %>%
+  filter(treatment %in% c(group1, group2)) %>%
+  droplevels()
+
+filtered_summary <- sumstats_all %>%
+  filter(treatment %in% c(group1, group2)) %>%
+  droplevels()
+
+```
+
+### filter days if needed 
+```{r}
+treatments_of_interest <- c(group1, group2)
+
+valid_days <- long_data %>%
+  filter(treatment %in% treatments_of_interest) %>%
+  distinct(day, treatment) %>%
+  count(day) %>%
+  filter(n == length(treatments_of_interest)) %>%
+  pull(day)
+
+message("Overlapping days for ", group1, " and ", group2, ": ", paste(valid_days, collapse = ", "))
+
+filtered_summary  <- filtered_summary %>% filter(day %in% valid_days)
+filtered_data <- filtered_data %>% filter(day %in% valid_days)
+```
+
+
+## Statistical Analysis
+```{r treatment stats}
+pairwise_stats <- run_pairwise_stats(
+  data = filtered_data, measurements = measurements,         
+  group_var = "treatment", group1 = group1, group2 = group2,
+  stratify_var = "genotype",id_var = "exp_no")
+
+save_csv(data = pairwise_stats, path = file.path(save_path, paste0(exp_name,  "_", comparison, "_stats.csv")))
+
+```
+
+
+## Plots with stat annotation
+```{r}
+plots_folder <- file.path(save_path, "Plots")
+make_subdir(plots_folder)
+
+filtered_summary <- filtered_summary %>% filter(day != 3)
+filtered_data <- filtered_data %>% filter(day != 3)
+
+plot_recipes <- list()
+
+for (measure in measurements$measurement) {
+  for (cell_val in unique(filtered_data$genotype)) {
+    cell_val <- as.character(cell_val)
+
+    p <- make_flow_plot(
+      measurement_name = measure,
+      summary_data = filtered_summary,
+      raw_data = filtered_data,
+      cell_val = cell_val,
+      folder = save_path,
+      exp_name = exp_name,
+      color_map = color_map
+    )
+    
+    if (grepl("D21", cell_val)) {
+      p <- p + 
+        scale_fill_manual(name = NULL, values = setNames(color_map$Color, color_map$Group))+
+        guides(
+          fill = guide_legend(order = 1, override.aes = list(alpha = 1)),
+          color = "none", alpha = "none")
+    } else if (grepl("T21", cell_val)) {
+      p <- p + 
+        scale_fill_manual(name = NULL, values = setNames(color_map$Color, color_map$Group))+
+        guides(
+          fill = "none",
+          color = guide_legend(order = 1, override.aes = list(fill = NA)),
+          alpha = "none"
+        )
+    }
+    
+    # Annotate stats — comparing treatment *within* each genotype
+    p_annot <- add_pairwise_annotation(
+      plot = p,
+      stats_data = pairwise_stats,           
+      measurement = measure,
+      group_col = "treatment",                
+      stratify_by = "genotype",             
+      stratify_level = cell_val,
+      show_pval = TRUE, 
+      show_effect = TRUE
+    )
+
+    # Save it
+    ggsave(filename = paste0(exp_name, "_", measure, "_", cell_val, "_", comparison, "_stats.pdf"),
+      plot = p_annot, path = plots_folder,
+      width = 5, height = 7, units = "in"
+    )
+    
+    plot_key <- paste0(measure, "_", cell_val)
+    plot_recipes[[plot_key]] <- list(
+      measurement_name = measure,
+      summary_data = filtered_summary,
+      raw_data = filtered_data, cell_val = cell_val,
+      folder = save_path, exp_name = exp_name,
+      color_map = color_map,
+      group_col = "treatment",
+      stratify_by = "genotype",
+      stratify_level = cell_val,
+      show_pval = TRUE, show_effect = TRUE
+    )
+
+  }
+}
+
+saveRDS(plot_recipes, file = file.path(rdata_path, paste0(exp_name, "_", comparison, "_plot_recipes.rds")))
+
+
+```
+

@@ -1,0 +1,137 @@
+﻿gene,pathway,tissue,cardiac region,DS Relevance
+PTCH1,HH,general,SHF,
+HHIP,HH,general,SHF,
+GLI1,HH,general,SHF,
+SMO,HH,general,SHF,
+FOXF1,RA,tissue-specific,pSHF,
+FOXF2,HH,tissue-specific,SHF,
+CYP26A1,RA,general,,
+CYP26B1,RA ,general,,
+HOXA1,RA,general,,
+DHRS3,RA,general,,
+FGF8,RA,general,pSHF,
+FGF10,RA,general,pSHF,
+TBX5,RA,tissue-specific,pSHF,
+ARG1,RA,,pSHF,
+RARA,RA,general,,
+RARB,RA,general,,
+CRABP2,RA,general,,
+NR2F1,RA,tissue-specific,pSHF,
+NR2F2,RA,tissue-specific,pSHF,
+KCNJ3,RA,tissue-specific,pSHF,
+HOXB1,RA ,general,,
+HOXA2,RA,general,,
+HOXA3,RA,general,,
+HOXB2,RA,general,,
+HOXB3 ,RA,general,,
+PITX2,RA,tissue-specific,,
+HEY1,RA,tissue-specific,,
+MESP1,,CM,,
+ISL1,,CM,Ventricular,
+NKX2-5,,CM,,
+NKX2-6,,CM,,
+GATA4,,CM,,
+GATA6,,CM,,
+TBX20,,CM,,
+HAND1,,CM,Ventricular,
+HAND2,,CM,,
+MEF2C,,CM,Ventricular,
+MEIS1,,CM,,
+HOPX,,CM,,
+SIRPA,,CM,atrial,
+SHOX2,,CM,,
+OSR1,,CM,,
+HEY2,,CM,,
+IRX3,,CM,,
+IRX4,,CM,Ventricular,
+IRX5,,CM,,
+TTN,,CM,,
+TNNT2,,CM,,
+TNNT1,,CM,,
+TNNI3,,CM,,
+TNNC1,,CM,,
+MYL7,,CM,,
+MYL3,,CM,Ventricular,
+MYL2,,CM,Ventricular,
+MYH6,,CM,Atrial,
+MYH7,,CM,Ventricular,
+ACTN2,,CM,,
+NPPA,,CM,Atrial,
+SCN5A,,CM,,
+RYR2,,CM,,
+GJA1,,CM,,
+GJA5,,CM,Atrial,
+KCNJ3,,CM,,
+KCNJ5,,CM,,
+KCNA5,,CM,,
+CACNA1C,,CM,,
+CASQ2,,CM,,
+PLN,,CM,,
+SLN,,CM,,
+MEIS2 ,,CM,Atrial,
+HOXB1,,CM,Atrial,
+TBX1,,CM,,
+LBH,,CM,Ventricular,
+APP,T21,,21q21.3,Alzheimer-like pathology
+SOD1,T21,,21q22.1,Not well-established
+DYRK1A,T21,,21q22.13,"Neurodevelopment, heart"
+RCAN1,T21,,21q22.12,"Heart, calcineurin signaling"
+CBS,T21,,21q22.3,Not well-established
+SYNJ1,T21,,21q22.11,Not well-established
+TIAM1,T21,,21q22.11,Not well-established
+CLIC6,T21,,21q22.11,Not well-established
+RUNX1,T21,,21q22.12,Leukemia risk
+ERG,T21,,21q22.3,Leukemia risk
+ETS2,T21,,21q22.3,Not well-established
+SIM2,T21,,21q22.2,Craniofacial and CNS development
+DSCAM,T21,,21q22.2,"Neurodevelopment, heart"
+COL6A1,T21,,21q22.3,Cardiac ECM
+COL6A2,T21,,21q22.3,Cardiac ECM
+IFNAR1,T21,,21q22.11,Immune dysregulation
+IFNAR2,T21,,21q22.11,Immune dysregulation
+IL10RB,T21,,21q22.11,Immune dysregulation
+PRMT2,T21,,21q22.3,Not well-established
+GABPA,T21,,21q21.3,Not well-established
+ITGB2,T21,,21q22.3,Not well-established
+KCNJ6,T21,,21q22.13,Synaptic signaling
+PCNT,T21,,21q22.3,Ciliary defects
+DOPEY2,T21,,21q22.13,Neurodevelopment
+BACH1,T21,,21q21.3,Oxidative stress
+HMGN1,T21,,21q22.1,"Neurogenesis, epigenetic dysregulation"
+U2AF1,T21,,21q22.3,Not well-established
+SLC19A1,T21,,21q22.3,Folate metabolism
+PFKL,T21,,21q22.3,Not well-established
+CXADR,T21,,21q21.1,Not well-established
+C21ORF91,T21,,21q21.1,Not well-established
+C21ORF33,T21,,21q21.1,Not well-established
+MRPL39,T21,,21q22.11,Not well-established
+HLCS,T21,,21q22.1,Not well-established
+TMEM50B,T21,,21q22.3,Not well-established
+ABCG1,T21,,21q22.3,Not well-established
+ADARB1,T21,,21q22.3,Not well-established
+ANKRD39,T21,,21q22.11,Not well-established
+ATP5J,T21,,21q21.1,Not well-established
+B3GALT5,T21,,21q22.3,Not well-established
+CHAF1B,T21,,21q22.11,Not well-established
+CHODL,T21,,21q22.11,Not well-established
+CHAF1A,T21,,21q22.11,Not well-established
+CYYR1,T21,,21q21.1,Not well-established
+FAM3B,T21,,21q22.3,Not well-established
+FAM207A,T21,,21q22.3,Not well-established
+GART,T21,,21q22.1,"Purine metabolism, neurodevelopment"
+IFNGR2,T21,,21q22.11,Not well-established
+ITSN1,T21,,21q22.1,Not well-established
+LIPI,T21,,21q22.3,Not well-established
+MRPS6,T21,,21q22.3,Not well-established
+N6AMT1,T21,,21q22.3,Not well-established
+PWP2,T21,,21q22.3,Not well-established
+RRP1B,T21,,21q22.3,Not well-established
+SCAF4,T21,,21q22.3,Not well-established
+SETD4,T21,,21q22.3,Not well-established
+SON,T21,,21q22.11,Not well-established
+TMEM50A,T21,,21q22.3,Not well-established
+TRAPPC10,T21,,21q22.3,Not well-established
+UBASH3A,T21,,21q22.3,Not well-established
+USP25,T21,,21q11.2,Innate immunity
+WDR4,T21,,21q22.3,Not well-established
+YBEY,T21,,21q22.3,Not well-established
