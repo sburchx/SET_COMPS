@@ -1,6 +1,6 @@
-# SAB01 Project
+# T21 Project
 
-### Project details:
+### Experiment details:
 
 -   [Cell Lines:]{.underline}
     -   **SET2**: WiCell - Bhattacharyya Collection

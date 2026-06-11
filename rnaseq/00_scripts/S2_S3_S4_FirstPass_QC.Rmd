@@ -300,10 +300,14 @@ save_csv(metadata_combined_clean, file.path(data_path, paste0(exp_name, "_metada
 treatment_colors <- c("CTRL" = "#999999", "RA" = "#D55E00")
 genotype_colors  <- c("D21" = "#56B4E9", "T21" = "#CC79A7")
 
-tp_levels <- levels(metadata_combined_clean$timepoint)
+tp_levels <- unique(as.character(metadata_combined_clean$timepoint))
+
+tp_levels <- tp_levels[
+  order(as.numeric(gsub("D", "", tp_levels)))
+]
 
 timepoint_colors <- setNames(
-  ggsci::pal_npg()(length(tp_levels)),
+ggsci::pal_npg()(length(tp_levels)),
   tp_levels )
 
 annotation_colors <- list(
@@ -449,10 +453,10 @@ generatePCA(vsd = assay(vsd), metadata = metadata, all_sampleIDs,
 # --------------------
 # STEP 2: Build DESeq2 object + run DESeq
 ```{r}
-metadata$cell_set  <- factor(metadata$cell_set, levels = c("Set3", "Set4"))
+metadata$cell_set  <- factor(metadata$cell_set, levels = c("Set3", "Set4", "Set2"))
 metadata$genotype  <- factor(metadata$genotype, levels = c("D21", "T21"))
 metadata$treatment <- factor(metadata$treatment, levels = c("CTRL", "RA"))
-metadata$timepoint <- factor(metadata$timepoint, levels = c("D3", "D4", "D6", "D8", "D10"))
+metadata$timepoint <- factor(metadata$timepoint, levels = c("D3", "D4", "D5", "D6", "D7", "D8", "D10"))
 
 metadata <- metadata[colnames(txi$counts), , drop = FALSE]
 stopifnot(all(colnames(txi$counts) == rownames(metadata)))
@@ -541,7 +545,7 @@ round(p$variance, 2)[1:6]
 ```
 
 
-###  - OPTIONAL: Limma Batch Correction
+###  - SKIPPED: Limma Batch Correction
 
 ```{r limma}
 #preserve design so doesnt correct for biology 
@@ -584,12 +588,17 @@ p_lima <- PCAtools::pca(vsd_dds_limmaCorrected, metadata = metadata, removeVar =
 round(p_lima$variance, 2)[1:6]
 ```
 
-limmas corrected not necessary but doesnt appear to mess with biology so will continue to use for cleaner PCAs 
+
 
 ### PC2, 3, 4
 ```{r}
 
 # PC1 vs PC3
+p13_time <- PCAtools::biplot(p, x = "PC1", y = "PC3", 
+                             colby = "timepoint", shape = "cell_set", lab = metadata[["treatment"]], returnPlot = TRUE)
+ggsave(file.path(pca_path, paste0(exp_name, "_PCA_PC1_PC3_time.png")),
+       p13_time, width = 6, height = 5, dpi = 300)
+
 p13_time <- PCAtools::biplot(p, x = "PC1", y = "PC3", 
                              colby = "cell_set", shape = "treatment", lab = metadata[["timepoint"]], returnPlot = TRUE)
 ggsave(file.path(pca_path, paste0(exp_name, "_PCA_PC1_PC3_cell_set.png")),
@@ -604,7 +613,7 @@ ggsave(file.path(pca_path, paste0(exp_name, "_PC2_PC3_cell_set.png")),
 
 p23_time <- PCAtools::biplot(p, x = "PC2", y = "PC3",
                             colby = "timepoint", shape = "treatment", lab = metadata[["genotype"]], returnPlot = TRUE)
-ggsave(file.path(pca_path, paste0(exp_name, "_PC2_PC3_timepoint.png")),
+ggsave(file.path(pca_path, paste0(exp_name, "_PC2_PC3_time.png")),
        p23_time, width = 6, height = 5, dpi = 300)
 
 # PC1 vs PC4
@@ -615,7 +624,7 @@ ggsave(file.path(pca_path, paste0(exp_name, "_PC1_PC4_cell_set.png")),
 
 p14_batch <- PCAtools::biplot(p, x = "PC1", y = "PC4",
                              colby = "timepoint", shape = "cell_set", lab = metadata[["treatment"]], returnPlot = TRUE)
-ggsave(file.path(pca_path, paste0(exp_name, "_PC1_PC4_tim.png")),
+ggsave(file.path(pca_path, paste0(exp_name, "_PC1_PC4_time.png")),
        p14_batch, width = 6, height = 5, dpi = 300)
 
 
@@ -665,44 +674,96 @@ generatePCA(vsd_early, meta_early, early_ids,
 
 ```
 
-# --  STOPPED HERE -- #
-
-## PCAs
+### genotype specific PCAs
 ```{r}
+# D21 only
+d21_ids <- rownames(
+  metadata %>%
+    dplyr::filter(genotype == "D21")
+)
 
-# all samples
-ids <- get_ids(metadata)
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="treatment", label="genotype",
-            save_prefix=file.path(pca_path, paste0(exp_name, "_allSamples")),
+vsd_d21 <- assay(vsd_dds)[, d21_ids]
+meta_d21 <- metadata[d21_ids, , drop = FALSE]
+
+generatePCA(vsd_d21, meta_d21, d21_ids,
+            colby="timepoint", shape="treatment", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_D21_only_time")),
             annotation_colors=annotation_colors)
 
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="genotype", label="treatment",
-            save_prefix=file.path(pca_path, paste0(exp_name, "_allSamples2")),
+generatePCA(vsd_d21, meta_d21, d21_ids,
+            colby="cell_set", shape="treatment", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_D21_only_cell")),
             annotation_colors=annotation_colors)
 
 
+# T21 only
+t21_ids <- rownames(
+  metadata %>%
+    dplyr::filter(genotype == "T21")
+)
+
+vsd_t21 <- assay(vsd_dds)[, t21_ids]
+meta_t21 <- metadata[t21_ids, , drop = FALSE]
+
+generatePCA(vsd_t21, meta_t21, t21_ids,
+            colby="timepoint", shape="treatment", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_T21_only_time")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_t21, meta_t21, t21_ids,
+            colby="cell_set", shape="treatment", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_T21_only_cell")),
+            annotation_colors=annotation_colors)
+```
+
+### treatment specific PCAs
+```{r}
 # CTRL only
-ids <- get_ids(metadata, treatments="CTRL")
+ctrl_ids <- rownames(
+  metadata %>%
+    dplyr::filter(treatment == "CTRL")
+)
 
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="genotype", label=NA,
-            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only")),
+vsd_ctrl <- assay(vsd_dds)[, ctrl_ids]
+meta_ctrl <- metadata[ctrl_ids, , drop = FALSE]
+
+generatePCA(vsd_ctrl, meta_ctrl, ctrl_ids,
+            colby="timepoint", shape="genotype", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only_time")),
             annotation_colors=annotation_colors)
 
+generatePCA(vsd_ctrl, meta_ctrl, ctrl_ids,
+            colby="cell_set", shape="genotype", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only_cell")),
+            annotation_colors=annotation_colors)
 
-# RA only + D3 pretreatment
-ids <- metadata %>%
-  dplyr::filter(treatment == "RA" | timepoint == "D3") %>%
-  dplyr::pull(sampleID)
+# RA only
+ra_ids <- rownames(
+  metadata %>%
+    dplyr::filter(treatment == "RA")
+)
 
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="genotype", label=NA,
-            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only")),
+vsd_ra <- assay(vsd_dds)[, ra_ids]
+meta_ra <- metadata[ra_ids, , drop = FALSE]
+
+
+generatePCA(vsd_ra, meta_ra, ra_ids,
+            colby="timepoint", shape="genotype", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only_time")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_ra, meta_ra, ra_ids,
+            colby="cell_set", shape="genotype", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only_cell")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_ra, meta_ra, ra_ids,
+            colby="genotype", shape="cell_set", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only_geno")),
             annotation_colors=annotation_colors)
 
 ```
+
 
 ## Correlation heatmaps 
 (using VST or batch-corrected)
@@ -714,26 +775,40 @@ heatmap_path <- file.path(save_dir, "Heatmap")
 make_subdir(heatmap_path)
 
 
-heatmap_plots <- list()
-
-# SORT:timepoint -> treatment -> genotype
+# SORT: genotype -> treatment -> timepoint -> cell_set
 genotype_order <- factor(metadata$genotype, levels = c("D21", "T21"))
-meta_hm <- metadata[order(metadata$timepoint, metadata$treatment, genotype_order), ]
+cell_set_order <- factor(metadata$cell_set, levels = c("Set3", "Set4", "Set2"))
+
+meta_hm <- metadata[
+  order(genotype_order,
+    metadata$treatment,
+    metadata$timepoint,
+    cell_set_order),
+]
 
 # subset VST matrix using defined order
-vsd_all <- vsd_mat[, meta_hm$sampleID, drop = FALSE]
+vsd_all <- assay(vsd_dds)[, meta_hm$sampleID_unique, drop = FALSE]
 cor_matrix <- cor(vsd_all)
 
-rownames(cor_matrix) <- meta_hm$genotype_timepoint_treatment_batch
-colnames(cor_matrix) <- meta_hm$sampleID
+rownames(cor_matrix) <- paste(
+  meta_hm$genotype,
+  meta_hm$timepoint,
+  meta_hm$treatment,
+  meta_hm$cell_set,
+  sep = "_"
+)
+
+colnames(cor_matrix) <- meta_hm$sampleID_unique
 
 
 col_annotation <- data.frame(
   timepoint = meta_hm$timepoint,
   treatment = meta_hm$treatment,
-  genotype  = meta_hm$genotype
+  genotype  = meta_hm$genotype,
+  cell_set  = meta_hm$cell_set
 )
-rownames(col_annotation) <- meta_hm$sampleID
+
+rownames(col_annotation) <- meta_hm$sampleID_unique
 
 # gap based on num of timepoints 
 num_clusters <- length(unique(meta_hm$timepoint))
@@ -754,40 +829,55 @@ ph1 <- pheatmap(
   border_color = NA,
   fontsize_row = 10,
   fontsize_col = 8,
-  height = 10,
+  height = 16,
   width = 10
 )
 
-heatmap_plots[["heatmap_allSamples"]] <- ph1
 ```
 
 ### by treatment 
 ```{r}
 unique_treatments <- unique(metadata$treatment)
 
-# loop through each treatent and generate heatpmap
+# loop through each treatment and generate heatmap
 for (trt in unique_treatments) {
-
-  #sort for plotting
+  
+  # sort: timepoint -> genotype -> cell_set
   meta_sub <- metadata[metadata$treatment == trt, ]
+  
   genotype_order <- factor(meta_sub$genotype, levels = c("D21", "T21"))
-  meta_sub <- meta_sub[order(meta_sub$timepoint, genotype_order), ]
-
-  vsd_subset <- vsd_mat[, meta_sub$sampleID, drop = FALSE]
+  cell_set_order <- factor(meta_sub$cell_set, levels = c("Set3", "Set4", "Set2"))
+  
+  meta_sub <- meta_sub[
+    order(
+      meta_sub$timepoint,
+      genotype_order,
+      cell_set_order
+    ),
+  ]
+  
+  vsd_subset <- assay(vsd_dds)[, meta_sub$sampleID_unique, drop = FALSE]
   cor_matrix <- cor(vsd_subset)
-
-  rownames(cor_matrix) <- meta_sub$genotype_timepoint_treatment_batch
-  colnames(cor_matrix) <- meta_sub$sampleID
-
+  
+  rownames(cor_matrix) <- paste(
+    meta_sub$genotype,
+    meta_sub$timepoint,
+    meta_sub$treatment,
+    meta_sub$cell_set,
+    sep = "_"
+  )
+  colnames(cor_matrix) <- meta_sub$sampleID_unique
+  
   col_annotation <- data.frame(
     timepoint = meta_sub$timepoint,
-    genotype  = meta_sub$genotype
+    genotype  = meta_sub$genotype,
+    cell_set  = meta_sub$cell_set
   )
-  rownames(col_annotation) <- meta_sub$sampleID
-
+  rownames(col_annotation) <- meta_sub$sampleID_unique
+  
   num_clusters <- length(unique(meta_sub$timepoint))
   heatmap_filename <- file.path(heatmap_path, paste0(exp_name, "_heatmap_", trt, ".png"))
-
+  
   phtrt <- pheatmap(
     cor_matrix,
     filename = heatmap_filename,
@@ -802,17 +892,18 @@ for (trt in unique_treatments) {
     border_color = NA,
     fontsize_row = 10,
     fontsize_col = 8,
-    height = 10,
+    height = 12,
     width = 10
   )
-
-  heatmap_plots[[paste0("heatmap_", trt)]] <- phtrt
+  
 }
 
-# save all 
-saveRDS(heatmap_plots, file = file.path(rdata_path, paste0(exp_name, "_all_heatmap_objects.rds")))
+
 
 ```
+
+
+
 
 
 ## DESeq RA interaction
@@ -828,7 +919,840 @@ resultsNames(dds_int)
 ```
 
 
-## --------------------
+## -------------------
+# SingScore
+Need: expression matrix, module gene lists
+```{r}
+library(singscore)
+
+score_dir <- file.path(save_dir, "Singscore")
+make_subdir(score_dir)
+
+expr_mat <- assay(vsd_dds)
+
+# load SAB01 scoreing gene sets
+all_scoring_gene_sets <- readRDS(file.path( "~/Library/CloudStorage/OneDrive-TheUniversityofChicago/R_Studio/SAB01/rnaseq/03_rdata/SAB01_all_scoring_gene_sets.rds"))
+
+
+# check overlap with expression matrix 
+usable_scoring_gene_sets <- purrr::map(
+  all_scoring_gene_sets,
+  ~ intersect(.x, rownames(expr_mat))
+)
+
+usable_module_summary <- tibble::tibble(
+  module = names(usable_scoring_gene_sets),
+  n_genes = purrr::map_int(all_scoring_gene_sets, length),
+  n_usable = purrr::map_int(usable_scoring_gene_sets, length)
+)
+
+usable_module_summary
+
+# drop any empty modules 
+usable_scoring_gene_sets <- usable_scoring_gene_sets[
+  purrr::map_int(usable_scoring_gene_sets, length) > 0
+]
+```
+
+### Run singscore
+TotalScore →  actual module activity (what you care about)
+TotalDispersion → variability of ranks within the gene set
+```{r}
+#rank expression matrix 
+ranked_mat <- singscore::rankGenes(expr_mat)
+
+#run singscore
+score_list <- purrr::imap(
+  usable_scoring_gene_sets,
+  ~ {
+    res <- singscore::simpleScore(
+      rankData = ranked_mat,
+      upSet = .x
+    ) %>%
+      as.data.frame() %>%
+      tibble::rownames_to_column("sampleID_unique") %>%
+      dplyr::select(sampleID_unique, TotalScore) %>%
+      dplyr::rename(score = TotalScore) %>%
+      dplyr::mutate(module = .y)
+  }
+)
+
+score_df <- dplyr::bind_rows(score_list)
+
+# add metadata
+score_df <- score_df %>%
+  dplyr::left_join(
+    metadata,
+    by = "sampleID_unique"
+  ) %>%
+  dplyr::mutate(day_num = as.numeric(gsub("D", "", timepoint)))
+
+#check that scoring worked
+dplyr::count(score_df, module)
+sum(is.na(score_df$genotype)) # should be 0
+
+# Save df
+
+saveRDS(score_df,
+  file.path(rdata_path, paste0(exp_name, "_singscore_scores.rds")))
+
+readr::write_csv(score_df,
+  file.path(score_dir, paste0(exp_name, "_singscore_scores.csv")))
+```
+
+### Plot scores 
+
+Module function had this hard coded: 
+      breaks = c(3, 4, 6, 8, 10),
+      labels = c("D3", "D4", "D6", "D8", "D10")
+```{r}
+#module titles
+module_titles <- list(
+  g2m = "Cell Cycle (G2/M Progression)",
+  e2f = "Cell Cycle (E2F Targets)",
+  contractile = "Cardiomyocyte Contractile Function",
+  sarcomere = "Sarcomere Organization",
+  progenitor = "Cardiac Progenitor / Developmental Programing",
+  junction = "Cell Junction & Structural Organization",
+  canonical_ra = "Canonical Retinoic Acid Signaling",
+  curated_ra_signaling = "RA Transcriptional Regulation",
+  kegg_ra_metabolism = "Retinoic Acid Metabolism",
+  ra_cellcycle = "RA-Regulated Cell Cycle Response",
+  junction_organization = "Cell Junction & Structural Organization",
+  xu_global_cm = "Cardiomyocyte Identity (Embryonic)",
+  xu_atrial = "Atrial Cardiomyocyte Identity",
+  xu_ventricular = "Ventricular Cardiomyocyte Identity",
+  xu_shf_pharyngeal = "Second Heart Field / Pharyngeal Mesoderm",
+  xu_anterior_lpm = "Anterior Lateral Plate Mesoderm",
+  xu_san = "Sinoatrial Node Identity",
+  xu_avc = "Atrioventricular Canal Identity",
+  xu_offtarget = "Off-Target Lineage Signature",
+  deBono_all_atrial = "Atrial Cardiomyocyte Identity (Refined)",
+  deBono_a1_atrial = "Atrial Identity (Early / Progenitor-like)",
+  deBono_a2_atrial = "Atrial Identity (Nodal-like)",
+  deBono_a3_atrial = "Atrial Identity (Left Atrial)",
+  deBono_a4_atrial = "Atrial Identity (Right Atrial)",
+  deBono_ventricular = "Ventricular Cardiomyocyte Identity",
+  deBono_epicardial = "Epicardial Identity",
+  deBono_stromal = "Cardiac Stromal Identity",
+  curated_pluripotency = "Pluripotency / Undifferentiated State (Curated)",
+  curated_ra_metabolism = "Retinoic Acid Metabolism (Curated)",
+  curated_hh_activity = "Hedgehog Signaling Activity (Curated)",
+  curated_hh_feedback = "Hedgehog Feedback / Readout (Curated)",
+  curated_wnt_activity = "Wnt Signaling Activity (Curated)",
+  curated_wnt_output = "Canonical Wnt Signaling Output (Curated)",
+  curated_RA_pSHF_target = "RA Cardiac-Specific Targets (Curated)"
+)
+
+
+# only valid modules are used
+modules_to_plot <- intersect(
+  names(module_titles),
+  unique(score_df$module)
+)
+
+# loop and plot + save
+purrr::walk(
+  modules_to_plot,
+  ~ plot_module_score(
+      df = score_df,
+      module_name = .x,
+      title = module_titles[[.x]],
+      output_dir = score_dir,
+      file_prefix = paste0(exp_name, "_", .x),
+      width = 6, height = 5,
+      facet_by = "treatment"
+    )
+)
+```
+
+### Atrial vs ventricular plot 
+```{r}
+atrial_ventricular_df <- score_df %>%
+  dplyr::filter(module %in% c("xu_atrial", "xu_ventricular")) %>%
+  dplyr::select(sampleID, module, score, genotype, treatment, timepoint, day_num) %>%
+  tidyr::pivot_wider(
+    names_from = module,
+    values_from = score
+  )
+
+ggplot(
+  atrial_ventricular_df,
+  aes(x = xu_ventricular, y = xu_atrial, color = genotype)
+) +
+  geom_point(size = 3) +
+  geom_path(aes(group = interaction(genotype, treatment)), alpha = 0.5) +
+  facet_wrap(~ treatment) +
+  scale_color_manual(values = annotation_colors$genotype) +
+  labs(
+    x = "Ventricular identity score",
+    y = "Atrial identity score",
+    color = NULL,
+    title = "Atrial vs Ventricular Identity"
+  ) +
+  theme_pub() +
+  theme(legend.position = "top")
+```
+
+```{r}
+atrial_ventricular_df <- atrial_ventricular_df %>%
+  dplyr::mutate(
+    atrial_minus_ventricular = xu_atrial - xu_ventricular
+  )
+
+ggplot(
+  atrial_ventricular_df,
+  aes(x = day_num, y = atrial_minus_ventricular, color = genotype, group = genotype)
+) +
+  stat_summary(fun = mean, geom = "line", linewidth = 1.5) +
+  stat_summary(fun = mean, geom = "point", size = 2.5) +
+  facet_wrap(~ treatment) +
+  scale_x_continuous(
+    breaks = c(3, 4, 6, 8, 10),
+    labels = c("D3", "D4", "D6", "D8", "D10")
+  ) +
+  scale_color_manual(values = annotation_colors$genotype) +
+  labs(
+    title = "Relative Atrial vs Ventricular Identity",
+    x = NULL,
+    y = "Atrial - Ventricular score",
+    color = NULL
+  ) +
+  theme_pub() +
+  theme(
+    legend.position = "top",
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+
+
+### - SKIPPED- Inspect driving genes 
+```{r}
+
+# define inputs
+modules_of_interest <- c(
+  "canonical_ra",
+  "kegg_ra_metabolism")
+
+groupnm <- "RA_METBO"
+
+timepoints_of_interest <- c("D6", "D8", "D10")
+
+groups_of_interest <- list(
+  D21_RA = list(genotype = "D21", treatment = "RA"),
+  T21_RA = list(genotype = "T21", treatment = "RA")
+)
+
+top_n <- 20
+
+# build sample IDs for each group x day
+group_timepoint_samples <- purrr::imap_dfr(
+  groups_of_interest,
+  function(grp, grp_name) {
+    purrr::map_dfr(
+      timepoints_of_interest,
+      function(tp) {
+        metadata %>%
+          dplyr::filter(
+            genotype == grp$genotype,
+            treatment == grp$treatment,
+            timepoint == tp
+          ) %>%
+          dplyr::select(sampleID) %>%
+          dplyr::mutate(
+            group = grp_name,
+            timepoint = tp
+          )
+      }
+    )
+  }
+)
+
+group_timepoint_samples
+
+
+# -- Run top driver function and get top driver genes 
+
+driver_results <- purrr::map_dfr(
+  modules_of_interest,
+  function(this_module) {
+    
+    purrr::pmap_dfr(
+      group_timepoint_samples %>%
+        dplyr::group_by(group, timepoint) %>%
+        dplyr::summarise(sample_ids = list(sampleID), .groups = "drop"),
+      function(group, timepoint, sample_ids) {
+        
+        get_module_driver_table(
+          module_name = this_module,
+          ranked_mat = ranked_mat,
+          gene_sets = usable_scoring_gene_sets,
+          sample_ids = sample_ids,
+          top_n = top_n
+        ) %>%
+          dplyr::mutate(
+            group = group,
+            timepoint = timepoint
+          )
+      }
+    )
+  }
+)
+
+
+#view
+driver_results %>%
+  arrange(module, timepoint, group, rank_order)
+
+# Save
+write_csv(driver_results,
+  file.path(score_dir, paste0(exp_name, "_",groupnm, "_top_driver_genes.csv")))
+
+# -- View TOP 5 --
+top5_table <- driver_results %>%
+  dplyr::group_by(group, timepoint, module) %>%
+  dplyr::slice_head(n = 5) %>%
+  dplyr::ungroup()
+
+driver_results %>%
+  dplyr::group_by(group, timepoint, module) %>%
+  dplyr::slice_head(n = 5) %>%
+  dplyr::group_split(group, timepoint) %>%
+  purrr::walk(print)
+
+```
+
+Genes shared across multiple modules
+```{r}
+shared_driver_summary <- driver_results %>%
+  dplyr::count(group, timepoint, gene, sort = TRUE) %>%
+  dplyr::filter(n > 1)
+
+shared_driver_summary
+
+# make an overlap table 
+driver_overlap_table <- driver_results %>%
+  dplyr::select(group, timepoint, module, gene) %>%
+  dplyr::mutate(in_top = TRUE) %>%
+  tidyr::pivot_wider(
+    names_from = module,
+    values_from = in_top,
+    values_fill = FALSE
+  )
+
+driver_overlap_table
+
+# Save
+write_csv(driver_results,
+  file.path(score_dir, paste0(exp_name, "_",groupnm, "_top_driver_genes.csv")))
+
+write_csv(
+  shared_driver_summary,
+  file.path(score_dir, paste0(exp_name, "_", groupnm, "_shared_top_driver_genes.csv"))
+)
+
+write_csv(
+  driver_overlap_table,
+  file.path(score_dir, paste0(exp_name, "_driver_overlap_table_D8_D10.csv"))
+)
+```
+
+### landscape plot
+```{r}
+# Cardiac Development vs Cell Cycle
+landscape_dir <- file.path(score_dir, "Singscore_Landscape")
+make_subdir(landscape_dir)
+
+# define gene sets
+cardiac_dev_genes <- usable_scoring_gene_sets[["progenitor"]]
+cell_cycle_genes  <- usable_scoring_gene_sets[["e2f"]]
+
+
+```
+
+
+```{r}
+# rank genes for singscore
+ranked_expr <- singscore::rankGenes(vsd_limma)
+
+# score each module
+cardiac_dev_score <- singscore::simpleScore(
+  ranked_expr,
+  upSet = cardiac_dev_genes
+)$TotalScore
+
+cell_cycle_score <- singscore::simpleScore(
+  ranked_expr,
+  upSet = cell_cycle_genes
+)$TotalScore
+
+# combine scores with metadata
+landscape_df <- tibble::tibble(
+  sampleID = colnames(vsd_limma),
+  Cardiac_Development = as.numeric(cardiac_dev_score),
+  Cell_Cycle = as.numeric(cell_cycle_score)
+) %>%
+  dplyr::left_join(metadata, by = "sampleID") %>%
+  dplyr::mutate(
+    timepoint = factor(timepoint, levels = c("D3", "D4", "D6", "D8", "D10")),
+    treatment = factor(treatment, levels = c("CTRL", "RA")),
+    genotype = factor(genotype, levels = c("D21", "T21"))
+  )
+
+# quick check
+head(landscape_df)
+```
+
+#### all samples 
+```{r}
+
+# all samples
+
+p_landscape_all <- ggplot(
+  landscape_df,
+  aes(
+    x = Cardiac_Development,
+    y = Cell_Cycle,
+    color = timepoint,
+    shape = treatment
+  )) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = annotation_colors$timepoint, drop = FALSE) +
+  ggrepel::geom_text_repel(
+  aes(label = genotype),
+  size = 3,
+  max.overlaps = Inf)+
+  theme_pub(base_size = 14) +
+  labs(
+    title = "Cardiac development vs cell cycle landscape",
+    x = "Cardiac Development Score",
+    y = "Cell Cycle Score",
+    color = "Timepoint",
+    shape = "Treatment") +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "top")
+
+p_landscape_all
+
+ggsave(file.path(landscape_dir, paste0(exp_name, "_allSamples_SingLandscape_CardiacDev_vs_CellCycle.pdf")),
+  p_landscape_all, width = 5, height = 5, dpi = 300, bg = "white")
+```
+
+
+#### filtered
+
+```{r}
+# one treatment 
+landscape_ctrl <- landscape_df %>%
+  dplyr::filter(treatment == "CTRL")
+
+
+p_landscape_ctrl <- ggplot(landscape_ctrl,
+  aes(x = Cardiac_Development, y = Cell_Cycle,
+    color = genotype, shape = timepoint)) +
+  geom_point(size = 2, alpha = 0.8, stroke = 0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+  scale_color_manual(values = annotation_colors$genotype, drop = FALSE) +
+  theme_pub(base_size = 8) +
+  labs(
+    title = NULL,
+    x = "Cardiac Development",
+    y = "Cell Cycle",
+    color = NULL, shape = NULL) +
+  theme(
+    legend.position = "top",
+  )
+
+p_landscape_ctrl
+
+ggsave(file.path(landscape_dir, paste0(exp_name, "_CTRL_SingLandscape_CardiacDev_vs_CellCycle.pdf")), p_landscape_ctrl,
+  width =42, height = 64,  units = "mm", dpi = 300, bg = "white") # for figure 
+```
+
+```{r}
+
+
+# # save score table
+# readr::write_csv(
+#   landscape_df,
+#   file.path(landscape_dir, paste0(exp_name, "_SingscoreLandscape_CardiacDev_vs_CellCycle_scores.csv"))
+# )
+# 
+# saveRDS(
+#   landscape_df,
+#   file.path(rdata_path, paste0(exp_name, "_SingscoreLandscape_CardiacDev_vs_CellCycle_scores.rds"))
+# )
+
+
+```
+
+
+## RA effect at the module level
+### Summarize scores by module / genotype / day / treatment 
+```{r}
+score_effect_dir <- file.path(score_dir, "RA_effect")
+make_subdir(score_effect_dir)
+
+module_score_summary <- score_df %>%
+  dplyr::group_by(module, genotype, timepoint, day_num, treatment) %>%
+  dplyr::summarise(
+    mean_score = mean(score, na.rm = TRUE),
+    sd_score = sd(score, na.rm = TRUE),
+    n = dplyr::n(),
+    .groups = "drop"
+  )
+
+module_score_summary
+
+#calc delta 
+module_delta_df <- module_score_summary %>%
+  dplyr::select(module, genotype, timepoint, day_num, treatment, mean_score) %>%
+  tidyr::pivot_wider(
+    names_from = treatment,
+    values_from = mean_score
+  ) %>%
+  dplyr::mutate(
+    delta_ra = RA - CTRL
+  )
+
+module_delta_df
+
+# check 
+module_delta_df %>%
+  dplyr::filter(module %in% c("g2m", "contractile", "xu_shf_pharyngeal")) %>%
+  dplyr::arrange(module, genotype, day_num)
+```
+
+```{r}
+saveRDS(module_delta_df,
+  file.path(rdata_path, paste0(exp_name, "_module_delta_ra_scores.rds")))
+
+readr::write_csv(module_delta_df,
+  file.path(score_effect_dir, paste0(exp_name, "_module_delta_ra_scores.csv")))
+```
+
+### (Optional) Plot
+```{r}
+plot_module_delta <- function(df, module_name,
+                              title = NULL, output_dir = NULL,
+                              file_prefix = NULL,
+                              width = 8, height = 5, dpi = 300) {
+  
+  if (is.null(title)) {
+    title <- module_name
+  }
+  
+  p <- df %>%
+    dplyr::filter(module == module_name) %>%
+    ggplot(aes(x = day_num, y = delta_ra, color = genotype, group = genotype)) +
+    stat_summary(fun = mean, geom = "line", linewidth = 1.5) +
+    stat_summary(fun = mean, geom = "point", size = 2.5) +
+    scale_x_continuous(
+      breaks = c(3, 4, 6, 8, 10),
+      labels = c("D3", "D4", "D6", "D8", "D10")
+    ) +
+    scale_color_manual(values = annotation_colors$genotype) +
+    labs(
+      title = title,
+      subtitle = paste0("Module: ", module_name),
+      x = NULL,
+      y = "RA - CTRL SingScore",
+      color = NULL
+    ) +
+    theme_pub() +
+    theme(
+      legend.position = "top",
+      legend.text = element_text(size = 14),
+      legend.title = element_blank()
+    )
+  
+  if (!is.null(output_dir)) {
+    if (is.null(file_prefix)) {
+      file_prefix <- module_name
+    }
+    
+    ggsave(
+      filename = file.path(output_dir, paste0(file_prefix, "_delta_trajectory.pdf")),
+      plot = p,
+      width = width, height = height, dpi = dpi, bg = "transparent"
+    )
+  }
+  
+  return(p)
+}
+```
+
+```{r}
+plot_module_delta(module_delta_df, "g2m", 
+                  title = "Cell Cycle (G2/M Progression)",
+                  output_dir = score_effect_dir,
+                  file_prefix = paste0(exp_name, "_g2m"))
+
+plot_module_delta(module_delta_df, "contractile", title = "Cardiomyocyte Contractile Function")
+
+plot_module_delta(module_delta_df, "xu_shf_pharyngeal", title = "Second Heart Field / Pharyngeal Mesoderm")
+```
+
+### Heatmap 
+```{r}
+# reshape
+heatmap_df <- module_delta_df %>%
+  dplyr::mutate(
+    genotype_day = paste(genotype, timepoint, sep = "_")
+  ) %>%
+  dplyr::select(module, genotype_day, delta_ra) %>%
+  tidyr::pivot_wider(
+    names_from = genotype_day,
+    values_from = delta_ra
+  )
+
+heatmap_df
+
+#convert to matrix
+heatmap_mat <- heatmap_df %>%
+  tibble::column_to_rownames("module") %>%
+  as.matrix()
+
+# order columns
+col_order <- c(
+  paste0("D21_D", c(3,4,6,8,10)),
+  paste0("T21_D", c(3,4,6,8,10))
+)
+
+heatmap_mat <- heatmap_mat[, col_order]
+# cap to compress outlier 
+cap <- 0.1
+heatmap_mat[heatmap_mat > cap] <- cap
+heatmap_mat[heatmap_mat < -cap] <- -cap
+
+# plot 
+heatmap_mod <-pheatmap::pheatmap(
+  heatmap_mat,
+  color = colors,
+  cluster_rows = TRUE,
+  cluster_cols = FALSE,
+  scale = "none",
+  fontsize_row = 10,
+  fontsize_col = 10,
+  main = "RA Response (RA - CTRL) Across Modules"
+)
+
+heatmap_mod
+
+ggsave(filename = file.path(score_effect_dir, paste0(exp_name, "_delta_heatmap.pdf")),
+    plot = heatmap_mod, width = 8, height = 6, dpi = 300, bg = "transparent")
+```
+
+## GSEA
+```{r}
+
+library(enrichplot)
+library(msigdbr)
+
+gsea_dir <- file.path(out_dir, "GSEA")
+make_subdir(gsea_dir)
+
+#DEG data 
+D21_unfiltered <- phase4_unfiltered 
+T21_unfiltered <- phase5_unfiltered
+
+#msigdbs
+msig_h <- msigdbr(species = "Homo sapiens", collection = "H") # hallmark sets
+msig_c2 <- msigdbr(species = "Homo sapiens", collection = "C2") # curated pathways 
+msig_c5 <- msigdbr(species = "Homo sapiens", collection = "C5")  # GO term
+
+# combine the relevant MSigDB collections
+msig_gsea_db <- dplyr::bind_rows(msig_h, msig_c2, msig_c5)
+```
+
+### Cardiac 
+```{r}
+# terms to test
+list_type <- "cardiac"
+
+gsea_terms <- c(
+  "GOBP_SARCOMERE_ORGANIZATION",
+  "REACTOME_STRIATED_MUSCLE_CONTRACTION",
+  "GOBP_CARDIAC_MUSCLE_CONTRACTION",
+  "KEGG_CARDIAC_MUSCLE_CONTRACTION",
+  "HALLMARK_G2M_CHECKPOINT",
+  "HALLMARK_E2F_TARGETS" 
+)
+
+# Build TERM2GENE from selected MSigDB terms 
+term2gene <- msig_gsea_db %>%
+  dplyr::filter(gs_name %in% gsea_terms) %>%
+  dplyr::select(gs_name, gene_symbol) %>%
+  dplyr::distinct()
+
+# sanity check
+setdiff(gsea_terms, unique(term2gene$gs_name))
+
+# Define input contrasts
+gsea_input_list <- list(
+  D21_D6_RA_vs_CTRL = D21_unfiltered[["D21_D6_RA_vs_D21_D6_CTRL"]],
+  D21_D8_RA_vs_CTRL = D21_unfiltered[["D21_D8_RA_vs_D21_D8_CTRL"]],
+  T21_D6_RA_vs_CTRL = T21_unfiltered[["T21_D6_RA_vs_T21_D6_CTRL"]],
+  T21_D8_RA_vs_CTRL = T21_unfiltered[["T21_D8_RA_vs_T21_D8_CTRL"]]
+)
+```
+
+###  Run & save
+```{r}
+
+# Run clusterProfiler GSEA for each contrast
+cp_gsea_list <- purrr::imap(
+  gsea_input_list,
+  ~ {
+    ranks <- prep_gsea_ranks(.x)
+    
+    clusterProfiler::GSEA(
+      geneList = ranks,
+      TERM2GENE = term2gene,
+      pvalueCutoff = 1,
+      verbose = FALSE
+    )
+  }
+)
+
+names(cp_gsea_list)
+
+# Save  GSEA results table
+cp_gsea_results <- purrr::imap_dfr(
+  cp_gsea_list,
+  ~ {
+    as_tibble(.x@result) %>%
+      dplyr::mutate(contrast = .y)
+  }
+)
+
+saveRDS(cp_gsea_results, file.path(rdata_path, paste0(exp_name, "_clusterProfiler_", list_type, "_GSEA_D6_D8_RA_vs_CTRL.rds")))
+
+readr::write_csv(cp_gsea_results, file.path(gsea_dir, paste0(exp_name, "_clusterProfiler_", list_type, "_GSEA_D6_D8_RA_vs_CTRL.csv")))
+```
+
+### Plots
+walk() applies a function (.f) only to each element, ignoring names or indices.
+iwalk() passes both the element (.x) and its index/name (.y) to the function
+```{r}
+# Loop through all contrasts and pathways and save full plots
+clean_file_label <- function(x) {
+  gsub("[^A-Za-z0-9_]+", "_", x)
+}
+
+purrr::iwalk(
+  cp_gsea_list,
+  ~ {
+    gsea_obj <- .x
+    contrast_nm <- .y
+    
+    valid_ids <- intersect(gsea_terms, gsea_obj@result$ID)
+    
+    purrr::walk(
+      valid_ids,
+      function(pathway_nm) {
+        
+        res_row <- cp_gsea_results %>%
+          dplyr::filter(
+            contrast == contrast_nm,
+            ID == pathway_nm
+          )
+        
+        plot_title <- paste0(
+          contrast_nm, "\n\n",
+          pathway_nm, "\n",
+          "NES = ", round(res_row$NES[1], 2),
+          " | FDR = ", signif(res_row$p.adjust[1], 2)
+        )
+        
+        p <- enrichplot::gseaplot2(
+          gsea_obj,
+          geneSetID = pathway_nm,
+          title = plot_title,
+          pvalue_table = FALSE
+        )
+        
+        ggsave(filename = file.path(gsea_dir,
+            paste0(clean_file_label(contrast_nm),
+              "__", clean_file_label(pathway_nm), "_gseaplot.pdf")),
+          plot = p, width = 6, height = 5, bg = "transparent"
+        )
+      }
+    )
+  }
+)
+```
+
+###  NES heatmap summary of results
+```{r}
+
+cp_heatmap_df <- cp_gsea_results %>%
+  dplyr::select(contrast, ID, NES) %>%
+  tidyr::pivot_wider(
+    names_from = contrast,
+    values_from = NES
+  )
+
+cp_heatmap_mat <- cp_heatmap_df %>%
+  tibble::column_to_rownames("ID") %>%
+  as.matrix()
+
+cp_heatmap_mat <- cp_heatmap_mat[, c(
+  "D21_D6_RA_vs_CTRL",
+  "D21_D8_RA_vs_CTRL",
+  "T21_D6_RA_vs_CTRL",
+  "T21_D8_RA_vs_CTRL"
+), drop = FALSE]
+
+desired_order <- c(
+  "GOBP_CARDIAC_MUSCLE_CONTRACTION",
+  "GOBP_SARCOMERE_ORGANIZATION",
+  "KEGG_CARDIAC_MUSCLE_CONTRACTION",
+  "REACTOME_STRIATED_MUSCLE_CONTRACTION",
+  "HALLMARK_E2F_TARGETS",
+  "HALLMARK_G2M_CHECKPOINT"
+)
+
+cp_heatmap_mat <- cp_heatmap_mat[desired_order, , drop = FALSE]
+
+annotation_col <- data.frame(
+  genotype = c("D21", "D21", "T21", "T21"),
+  timepoint = c("D6", "D8", "D6", "D8")
+)
+
+rownames(annotation_col) <- colnames(cp_heatmap_mat)
+ph_annotation_colors <- annotation_colors
+ph_annotation_colors$timepoint <- annotation_colors$timepoint[c("D6", "D8")]
+
+nes_heatmap <- pheatmap::pheatmap(
+  cp_heatmap_mat,
+  color = colors,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  annotation_col = annotation_col,
+  annotation_colors = ph_annotation_colors,
+  main = "GSEA NES: RA vs CTRL at D6 and D8"
+)
+
+nes_heatmap
+
+ggsave(filename = file.path(gsea_dir,
+            paste0(exp_name,"_NESheatmap.pdf")),
+          plot = nes_heatmap, width = 8, height = 5, bg = "transparent")
+```
+
+
+
+
+
+
+
+
+
+# xxxxxxxxxxxxxx-
 # STEP 4: DEseq2 DEG analysis
 
 ```{r}
@@ -997,44 +1921,6 @@ dev.off()
 
 
 
-
-## Metascape Export 
-```{r}
-meta_path <- file.path(deg_path, "Metascape")
-make_subdir(meta_path)
-
-#global background
-all_tested_global <- unique(unlist(
-  lapply(unfiltered_results, function(comp_list) {
-    lapply(comp_list, function(df) df$gene_id)
-  })
-))
-
-for (comp in names(filtered_results)) {
-  comp_lists <- filtered_results[[comp]]   # named vectors for each contrast .up/.dn
-  if (length(comp_lists) == 0) next
-
-  # sanitize: ensure character, drop NA/dup
-  comp_lists <- lapply(comp_lists, function(v) unique(na.omit(as.character(v))))
-
-  # Global background (default):
-  comp_lists[["_BACKGROUND"]] <- all_tested_global
-
-  # Rectangle-ize to a data frame (pad shorter columns with NA)
-  max_len <- max(lengths(comp_lists))
-  df_comp <- tibble::tibble(.rows = max_len)
-  for (nm in names(comp_lists)) {
-    vec <- comp_lists[[nm]]
-    length(vec) <- max_len
-    df_comp[[nm]] <- vec
-  }
-
-  out_csv <- file.path(meta_path, paste0(exp_name, "_", comp, "_for_Metascape.csv"))
-  readr::write_csv(df_comp, out_csv)
-}
-```
-
-
 ## --------------------
 # STEP 5: Chromosome Annotation
 Use same bed file that was used to map reads to annotate chromosomes
@@ -1177,7 +2063,7 @@ saveRDS(total_ratio_df, file = file.path(rdata_path, paste0(exp_name, "_total_ra
 
 ## Check for sex 
 ```{r}
-sex_qc <- make_sex_qc(vsd_mat, metadata, line_name = exp_name)
+sex_qc <- make_sex_qc(assay(vsd_dds), metadata, line_name = exp_name)
 
 sex_qc$plot
 sex_qc$predicted_sex

@@ -29,7 +29,7 @@ SAB01_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.process
 SAB08_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/SAB08/star_salmon"
 
 # -- SET 2 -- 
-
+SAB06_star_salmon_path <- "/Volumes/project/imoskowitz/shared/sequencing.processed/SAB06/star_salmon"
 
 ```
 

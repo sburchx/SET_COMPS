@@ -46,6 +46,8 @@ results_path <- here("rnaseq", "02_results")
 rdata_path <- here("rnaseq", "03_rdata")
 source(here("rnaseq", "00_scripts", "rnaseq_functions.R"))
 
+colors <- colorRampPalette(c("#3B4CC0", "white", "#B40426"))(100)
+breaks <- seq(-2, 2, length.out = 101)
 
 # load metasheets and txi
 # -- SET 3 -- 
@@ -353,9 +355,9 @@ ggplot(
 
 
 # --------------------
-# STEP 2: Check variation
+# 1. DESeq2 global effects
 
-## dds ~1 design
+## ~1 design
 ```{r}
 dds <- DESeqDataSetFromTximport(
   txi_combined,
@@ -367,7 +369,7 @@ vsd <- vst(dds, blind = TRUE)
 
 ```
 
-## PCA
+### PCA
 ```{r}
 all_sampleIDs <- colnames(assay(vsd))
 
@@ -391,8 +393,12 @@ generatePCA(vsd = assay(vsd), metadata = metadata, all_sampleIDs,
 
 
 # --------------------
-# STEP 2: Build DESeq2 object + run DESeq
+# 3. DESeq2 main effects ~ cell_set + timepoint + genotype + treatment
 ```{r}
+main_effects_path <- file.path(save_dir, "Main_Effects")
+make_subdir(main_effects_path)
+
+
 metadata$cell_set  <- factor(metadata$cell_set, levels = c("Set3", "Set4"))
 metadata$genotype  <- factor(metadata$genotype, levels = c("D21", "T21"))
 metadata$treatment <- factor(metadata$treatment, levels = c("CTRL", "RA"))
@@ -402,7 +408,7 @@ metadata <- metadata[colnames(txi$counts), , drop = FALSE]
 stopifnot(all(colnames(txi$counts) == rownames(metadata)))
 ```
 
-##  DESeq2 global effect 
+##  ~ cell_set + timepoint + genotype + treatment
 ```{r }
 dds <- DESeqDataSetFromTximport(
   txi = txi,
@@ -431,19 +437,17 @@ cat("Percent removed:", round(100 * (nrow(dds) - sum(keep)) / nrow(dds), 2), "%\
 
 dds <- dds[keep, ]
 
-processed_dds <- DESeq(dds)
+processed_dds_group <- DESeq(dds)
 
-resultsNames(processed_dds)
+resultsNames(processed_dds_group)
 
 ```
 
 
-# --------------------
-# STEP 3: PCA - global data check
-## Compute VST for PCA/heatmaps
+## PCA - global data check
 
 ```{r VST}
-pca_path <- file.path(save_dir, "PCA")
+pca_path <- file.path(main_effects_path, "PCA")
 make_subdir(pca_path)
 ```
 
@@ -484,51 +488,6 @@ p <- PCAtools::pca(assay(vsd_dds), metadata = metadata, removeVar = 0.9)
 round(p$variance, 2)[1:6]
 ```
 
-
-###  - OPTIONAL: Limma Batch Correction
-
-```{r limma}
-#preserve design so doesnt correct for biology 
-design_mat <- model.matrix(~ genotype_timepoint_treatment, data = colData(vsd_dds))
-
-vsd_dds_limmaCorrected <- limma::removeBatchEffect(
-  assay(vsd_dds),
-  batch = vsd_dds$experimentalBatch,
-  design = design_mat
-)
-
-# Ensure limma-corrected matrix has sample IDs and is ordered like metadata
-colnames(vsd_dds_limmaCorrected) <- colnames(assay(vsd_dds))
-vsd_dds_limmaCorrected <- vsd_dds_limmaCorrected[, rownames(metadata), drop = FALSE]
-
-saveRDS(vsd_dds_limmaCorrected, file = paste0(rdata_path, "/", exp_name, "_vsd_dds_limmaCorrected.rds"))
-
-# recheck PCA
-all_sampleIDs <- colnames(vsd_dds_limmaCorrected)
-
-# PCA 1: biology-first
-save_prefix <- file.path(pca_path, paste0(exp_name, "_limma_allSamples_colTime"))
-generatePCA(vsd = vsd_dds_limmaCorrected, metadata = metadata, all_sampleIDs,
-            colby = "timepoint", shape = "treatment", label = NA,
-            save_prefix = save_prefix)
-
-# PCA 2: QC-first
-save_prefix <- file.path(pca_path, paste0(exp_name, "_limma_allSamples_colBatch"))
-generatePCA(vsd = vsd_dds_limmaCorrected, metadata = metadata, all_sampleIDs,
-            colby = "experimentalBatch", shape = "genotype", label = NA,
-            save_prefix = save_prefix)
-
-pcaLoadings(
-  vsd_data = vsd_dds_limmaCorrected, metadata = metadata, sample_ids = all_sampleIDs,
-  exp_name = exp_name, name = "allSamples_limmaCorrection", results_dir = pca_path)  
-
-
-# print variance captured by each PCA 
-p_lima <- PCAtools::pca(vsd_dds_limmaCorrected, metadata = metadata, removeVar = 0.9)
-round(p_lima$variance, 2)[1:6]
-```
-
-limmas corrected not necessary but doesnt appear to mess with biology so will continue to use for cleaner PCAs 
 
 ### PC2, 3, 4
 ```{r}
@@ -609,45 +568,96 @@ generatePCA(vsd_early, meta_early, early_ids,
 
 ```
 
-# --  STOPPED HERE -- 
-# ---------------
-
-## PCAs
+### genotype specific PCAs
 ```{r}
+# D21 only
+d21_ids <- rownames(
+  metadata %>%
+    dplyr::filter(genotype == "D21")
+)
 
-# all samples
-ids <- get_ids(metadata)
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="treatment", label="genotype",
-            save_prefix=file.path(pca_path, paste0(exp_name, "_allSamples")),
+vsd_d21 <- assay(vsd_dds)[, d21_ids]
+meta_d21 <- metadata[d21_ids, , drop = FALSE]
+
+generatePCA(vsd_d21, meta_d21, d21_ids,
+            colby="timepoint", shape="treatment", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_D21_only_time")),
             annotation_colors=annotation_colors)
 
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="genotype", label="treatment",
-            save_prefix=file.path(pca_path, paste0(exp_name, "_allSamples2")),
+generatePCA(vsd_d21, meta_d21, d21_ids,
+            colby="cell_set", shape="treatment", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_D21_only_cell")),
             annotation_colors=annotation_colors)
 
 
+# T21 only
+t21_ids <- rownames(
+  metadata %>%
+    dplyr::filter(genotype == "T21")
+)
+
+vsd_t21 <- assay(vsd_dds)[, t21_ids]
+meta_t21 <- metadata[t21_ids, , drop = FALSE]
+
+generatePCA(vsd_t21, meta_t21, t21_ids,
+            colby="timepoint", shape="treatment", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_T21_only_time")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_t21, meta_t21, t21_ids,
+            colby="cell_set", shape="treatment", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_T21_only_cell")),
+            annotation_colors=annotation_colors)
+```
+
+### treatment specific PCAs
+```{r}
 # CTRL only
-ids <- get_ids(metadata, treatments="CTRL")
+ctrl_ids <- rownames(
+  metadata %>%
+    dplyr::filter(treatment == "CTRL")
+)
 
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="genotype", label=NA,
-            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only")),
+vsd_ctrl <- assay(vsd_dds)[, ctrl_ids]
+meta_ctrl <- metadata[ctrl_ids, , drop = FALSE]
+
+generatePCA(vsd_ctrl, meta_ctrl, ctrl_ids,
+            colby="timepoint", shape="genotype", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only_time")),
             annotation_colors=annotation_colors)
 
+generatePCA(vsd_ctrl, meta_ctrl, ctrl_ids,
+            colby="cell_set", shape="genotype", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_CTRL_only_cell")),
+            annotation_colors=annotation_colors)
 
-# RA only + D3 pretreatment
-ids <- metadata %>%
-  dplyr::filter(treatment == "RA" | timepoint == "D3") %>%
-  dplyr::pull(sampleID)
+# RA only
+ra_ids <- rownames(
+  metadata %>%
+    dplyr::filter(treatment == "RA")
+)
 
-generatePCA(vsd_mat, metadata, ids,
-            colby="timepoint", shape="genotype", label=NA,
-            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only")),
+vsd_ra <- assay(vsd_dds)[, ra_ids]
+meta_ra <- metadata[ra_ids, , drop = FALSE]
+
+
+generatePCA(vsd_ra, meta_ra, ra_ids,
+            colby="timepoint", shape="genotype", label="cell_set",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only_time")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_ra, meta_ra, ra_ids,
+            colby="cell_set", shape="genotype", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only_cell")),
+            annotation_colors=annotation_colors)
+
+generatePCA(vsd_ra, meta_ra, ra_ids,
+            colby="genotype", shape="cell_set", label="timepoint",
+            save_prefix=file.path(pca_path, paste0(exp_name, "_RA_only_geno")),
             annotation_colors=annotation_colors)
 
 ```
+
 
 ## Correlation heatmaps 
 (using VST or batch-corrected)
@@ -655,30 +665,44 @@ generatePCA(vsd_mat, metadata, ids,
 ### all samples
 ```{r}
 
-heatmap_path <- file.path(save_dir, "Heatmap")
+heatmap_path <- file.path(main_effects_path, "Heatmap")
 make_subdir(heatmap_path)
 
 
-heatmap_plots <- list()
-
-# SORT:timepoint -> treatment -> genotype
+# SORT: genotype -> treatment -> timepoint -> cell_set
 genotype_order <- factor(metadata$genotype, levels = c("D21", "T21"))
-meta_hm <- metadata[order(metadata$timepoint, metadata$treatment, genotype_order), ]
+cell_set_order <- factor(metadata$cell_set, levels = c("Set3", "Set4"))
+
+meta_hm <- metadata[
+  order(genotype_order,
+    metadata$treatment,
+    metadata$timepoint,
+    cell_set_order),
+]
 
 # subset VST matrix using defined order
-vsd_all <- vsd_mat[, meta_hm$sampleID, drop = FALSE]
+vsd_all <- assay(vsd_dds)[, meta_hm$sampleID_unique, drop = FALSE]
 cor_matrix <- cor(vsd_all)
 
-rownames(cor_matrix) <- meta_hm$genotype_timepoint_treatment_batch
-colnames(cor_matrix) <- meta_hm$sampleID
+rownames(cor_matrix) <- paste(
+  meta_hm$genotype,
+  meta_hm$timepoint,
+  meta_hm$treatment,
+  meta_hm$cell_set,
+  sep = "_"
+)
+
+colnames(cor_matrix) <- meta_hm$sampleID_unique
 
 
 col_annotation <- data.frame(
   timepoint = meta_hm$timepoint,
   treatment = meta_hm$treatment,
-  genotype  = meta_hm$genotype
+  genotype  = meta_hm$genotype,
+  cell_set  = meta_hm$cell_set
 )
-rownames(col_annotation) <- meta_hm$sampleID
+
+rownames(col_annotation) <- meta_hm$sampleID_unique
 
 # gap based on num of timepoints 
 num_clusters <- length(unique(meta_hm$timepoint))
@@ -699,40 +723,55 @@ ph1 <- pheatmap(
   border_color = NA,
   fontsize_row = 10,
   fontsize_col = 8,
-  height = 10,
+  height = 16,
   width = 10
 )
 
-heatmap_plots[["heatmap_allSamples"]] <- ph1
 ```
 
 ### by treatment 
 ```{r}
 unique_treatments <- unique(metadata$treatment)
 
-# loop through each treatent and generate heatpmap
+# loop through each treatment and generate heatmap
 for (trt in unique_treatments) {
-
-  #sort for plotting
+  
+  # sort: timepoint -> genotype -> cell_set
   meta_sub <- metadata[metadata$treatment == trt, ]
+  
   genotype_order <- factor(meta_sub$genotype, levels = c("D21", "T21"))
-  meta_sub <- meta_sub[order(meta_sub$timepoint, genotype_order), ]
-
-  vsd_subset <- vsd_mat[, meta_sub$sampleID, drop = FALSE]
+  cell_set_order <- factor(meta_sub$cell_set, levels = c("Set3", "Set4"))
+  
+  meta_sub <- meta_sub[
+    order(
+      meta_sub$timepoint,
+      genotype_order,
+      cell_set_order
+    ),
+  ]
+  
+  vsd_subset <- assay(vsd_dds)[, meta_sub$sampleID_unique, drop = FALSE]
   cor_matrix <- cor(vsd_subset)
-
-  rownames(cor_matrix) <- meta_sub$genotype_timepoint_treatment_batch
-  colnames(cor_matrix) <- meta_sub$sampleID
-
+  
+  rownames(cor_matrix) <- paste(
+    meta_sub$genotype,
+    meta_sub$timepoint,
+    meta_sub$treatment,
+    meta_sub$cell_set,
+    sep = "_"
+  )
+  colnames(cor_matrix) <- meta_sub$sampleID_unique
+  
   col_annotation <- data.frame(
     timepoint = meta_sub$timepoint,
-    genotype  = meta_sub$genotype
+    genotype  = meta_sub$genotype,
+    cell_set  = meta_sub$cell_set
   )
-  rownames(col_annotation) <- meta_sub$sampleID
-
+  rownames(col_annotation) <- meta_sub$sampleID_unique
+  
   num_clusters <- length(unique(meta_sub$timepoint))
   heatmap_filename <- file.path(heatmap_path, paste0(exp_name, "_heatmap_", trt, ".png"))
-
+  
   phtrt <- pheatmap(
     cor_matrix,
     filename = heatmap_filename,
@@ -747,51 +786,108 @@ for (trt in unique_treatments) {
     border_color = NA,
     fontsize_row = 10,
     fontsize_col = 8,
-    height = 10,
+    height = 12,
     width = 10
   )
-
-  heatmap_plots[[paste0("heatmap_", trt)]] <- phtrt
+  
 }
 
-# save all 
-saveRDS(heatmap_plots, file = file.path(rdata_path, paste0(exp_name, "_all_heatmap_objects.rds")))
+
 
 ```
 
 
-## DESeq RA interaction
-```{r}
-dds_int <- DESeqDataSetFromTximport(
+# -------------
+# 1. DESeq2 compound effect 
+```{r }
+comp_effects_path <- file.path(save_dir, "Compound_Effects")
+make_subdir(comp_effects_path)
+
+
+dds_group <- DESeqDataSetFromTximport(
   txi = txi,
   colData = metadata,
-  design = ~ cell_set + timepoint + genotype + treatment + genotype:treatment
+  design = ~ cell_set + genotype_timepoint_treatment
 )
 
-dds_int <- DESeq(dds_int)
-resultsNames(dds_int)
+keep <- edgeR::filterByExpr(
+  counts(dds_group),
+  group = metadata$group)
+
+
+cat("\n============================\n")
+cat(" filterByExpr summary\n")
+cat("============================\n")
+cat("Total genes:    ", nrow(dds), "\n")
+cat("Genes kept:     ", sum(keep), "\n")
+cat("Genes removed:  ", nrow(dds) - sum(keep), "\n")
+cat("Percent removed:", round(100 * (nrow(dds) - sum(keep)) / nrow(dds), 2), "%\n")
+
+dds_group <- dds_group[keep, ]
+
+processed_dds_group <- DESeq(dds_group)
+
+resultsNames(processed_dds_group)
+
+```
+
+## QC Global PCA  
+```{r PCA check}
+pca_path <- file.path(comp_effects_path, "PCA")
+make_subdir(pca_path)
+
+vsd_dds <- vst(processed_dds_group, blind = FALSE)
+
+all_sampleIDs <- colnames(assay(vsd_dds))
+
+# PCA 1: biology-first
+save_prefix <- file.path(pca_path, paste0(exp_name, "_colTime"))
+generatePCA(vsd = assay(vsd_dds), metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "cell_set", label = "genotype",
+            save_prefix = save_prefix )
+
+# PCA 2: QC-set-first
+save_prefix <- file.path(pca_path, paste0(exp_name, "_cell_set"))
+generatePCA(vsd = assay(vsd_dds), metadata = metadata, all_sampleIDs,
+            colby = "cell_set", shape = "genotype", label = NA,
+            save_prefix = save_prefix, scale_to_axes = TRUE)
+
+# PCA 3: 
+save_prefix <- file.path(pca_path, paste0(exp_name, "_time_geno"))
+generatePCA(vsd = assay(vsd_dds), metadata = metadata, all_sampleIDs,
+            colby = "timepoint", shape = "genotype", label = NA,
+            save_prefix = save_prefix, scale_to_axes = TRUE)
+
+
+# loadings
+pcaLoadings(
+  vsd_data = assay(vsd_dds),metadata = metadata, sample_ids = all_sampleIDs,
+  exp_name = exp_name, name = "allSamples", results_dir = pca_path)
+
+# print variance captured by each PCA 
+p <- PCAtools::pca(assay(vsd_dds), metadata = metadata, removeVar = 0.9)
+round(p$variance, 2)[1:6]
 ```
 
 
-## --------------------
-# STEP 4: DEseq2 DEG analysis
+# 2. DEseq2 DEG analysis
 
 ```{r}
 log2FC_Cutoff <- 0.5
 fdrCutoff <- 0.05
 
-deg_path <- file.path(save_dir, paste0("L2FC", log2FC_Cutoff, "_FDR", fdrCutoff))
+deg_path <- file.path(comp_effects_path, paste0("L2FC", log2FC_Cutoff, "_FDR", fdrCutoff))
 make_subdir(deg_path)
 
 # Check metadata and DESeq object alignment
-if (!all(rownames(metadata) == colnames(processed_dds))) {
-  warning("⚠️ Rownames in metadata do NOT match colnames in processed_dds!")
+if (!all(rownames(metadata) == colnames(processed_dds_group))) {
+  warning("⚠️ Rownames in metadata do NOT match colnames in processed_dds_group!")
   
   cat("🔍 Mismatch summary:\n")
   cat(" - Metadata rows:", nrow(metadata), "\n")
-  cat(" - DESeq2 columns:", ncol(processed_dds), "\n")
+  cat(" - DESeq2 columns:", ncol(processed_dds_group), "\n")
   cat(" - First few metadata row names:\n", head(rownames(metadata)), "\n")
-  cat(" - First few DESeq2 column names:\n", head(colnames(processed_dds)), "\n")
+  cat(" - First few DESeq2 column names:\n", head(colnames(processed_dds_group)), "\n")
   
 } else {
   cat("✅ Metadata rownames match DESeq2 column names.\n")
@@ -847,11 +943,11 @@ for (comp in names(deg_comparisons)) {
     }
     
     # Only run if both contrast groups exist
-    if (x %in% unique(processed_dds$genotype_timepoint_treatment) && 
-        y %in% unique(processed_dds$genotype_timepoint_treatment)) {
+    if (x %in% unique(processed_dds_group$genotype_timepoint_treatment) && 
+        y %in% unique(processed_dds_group$genotype_timepoint_treatment)) {
       
-      res <- DESeq2::results(processed_dds, contrast = c("genotype_timepoint_treatment", x, y), alpha=fdrCutoff)
-      res_shrunk <- lfcShrink(dds = processed_dds, contrast = c("genotype_timepoint_treatment", x, y), res = res, type = "ashr")
+      res <- DESeq2::results(processed_dds_group, contrast = c("genotype_timepoint_treatment", x, y), alpha=fdrCutoff)
+      res_shrunk <- lfcShrink(dds = processed_dds_group, contrast = c("genotype_timepoint_treatment", x, y), res = res, type = "ashr")
       
       # Add both raw and shrunk LFC using gene_id join
       res_df <- as.data.frame(res) %>% rownames_to_column("gene_id")
@@ -939,49 +1035,535 @@ gridExtra::grid.table(deg_summary_df)
 
 dev.off()
 ```
-
-
-
-
-## Metascape Export 
+#3.  SingScore 
+Need: expression matrix, module gene lists
 ```{r}
-meta_path <- file.path(deg_path, "Metascape")
-make_subdir(meta_path)
+library(singscore)
 
-#global background
-all_tested_global <- unique(unlist(
-  lapply(unfiltered_results, function(comp_list) {
-    lapply(comp_list, function(df) df$gene_id)
-  })
-))
+score_dir <- file.path(comp_effects_path, "Singscore")
+make_subdir(score_dir)
 
-for (comp in names(filtered_results)) {
-  comp_lists <- filtered_results[[comp]]   # named vectors for each contrast .up/.dn
-  if (length(comp_lists) == 0) next
+expr_mat <- assay(vsd_dds)
 
-  # sanitize: ensure character, drop NA/dup
-  comp_lists <- lapply(comp_lists, function(v) unique(na.omit(as.character(v))))
+# check overlap with expression matrix 
+usable_scoring_gene_sets <- purrr::map(
+  all_scoring_gene_sets,
+  ~ intersect(.x, rownames(expr_mat))
+)
 
-  # Global background (default):
-  comp_lists[["_BACKGROUND"]] <- all_tested_global
+usable_module_summary <- tibble::tibble(
+  module = names(usable_scoring_gene_sets),
+  n_genes = purrr::map_int(all_scoring_gene_sets, length),
+  n_usable = purrr::map_int(usable_scoring_gene_sets, length)
+)
 
-  # Rectangle-ize to a data frame (pad shorter columns with NA)
-  max_len <- max(lengths(comp_lists))
-  df_comp <- tibble::tibble(.rows = max_len)
-  for (nm in names(comp_lists)) {
-    vec <- comp_lists[[nm]]
-    length(vec) <- max_len
-    df_comp[[nm]] <- vec
+usable_module_summary
+
+# drop any empty modules 
+usable_scoring_gene_sets <- usable_scoring_gene_sets[
+  purrr::map_int(usable_scoring_gene_sets, length) > 0
+]
+```
+
+## Run singscore
+TotalScore →  actual module activity (what you care about)
+TotalDispersion → variability of ranks within the gene set
+```{r}
+#rank expression matrix 
+ranked_mat <- singscore::rankGenes(expr_mat)
+
+#run singscore
+score_list <- purrr::imap(
+  usable_scoring_gene_sets,
+  ~ {
+    res <- singscore::simpleScore(
+      rankData = ranked_mat,
+      upSet = .x
+    ) %>%
+      as.data.frame() %>%
+      tibble::rownames_to_column("sampleID_unique") %>%
+      dplyr::select(sampleID_unique, TotalScore) %>%
+      dplyr::rename(score = TotalScore) %>%
+      dplyr::mutate(module = .y)
   }
+)
 
-  out_csv <- file.path(meta_path, paste0(exp_name, "_", comp, "_for_Metascape.csv"))
-  readr::write_csv(df_comp, out_csv)
-}
+score_df <- dplyr::bind_rows(score_list)
+
+# add metadata
+score_df <- score_df %>%
+  dplyr::left_join(
+    metadata,
+    by = "sampleID_unique"
+  ) %>%
+  dplyr::mutate(day_num = as.numeric(gsub("D", "", timepoint)))
+
+#check that scoring worked
+dplyr::count(score_df, module)
+sum(is.na(score_df$genotype)) # should be 0
+
+# Save df
+
+saveRDS(score_df,
+  file.path(rdata_path, paste0(exp_name, "comp_singscore_scores.rds")))
+
+readr::write_csv(score_df,
+  file.path(score_dir, paste0(exp_name, "comp_singscore_scores.csv")))
+```
+
+### Plot scores 
+
+Module function had this hard coded: 
+      breaks = c(3, 4, 6, 8, 10),
+      labels = c("D3", "D4", "D6", "D8", "D10")
+```{r}
+#module titles
+module_titles <- list(
+  g2m = "Cell Cycle (G2/M Progression)",
+  e2f = "Cell Cycle (E2F Targets)",
+  contractile = "Cardiomyocyte Contractile Function",
+  sarcomere = "Sarcomere Organization",
+  progenitor = "Cardiac Progenitor / Developmental Programing",
+  junction = "Cell Junction & Structural Organization",
+  canonical_ra = "Canonical Retinoic Acid Signaling",
+  curated_ra_signaling = "RA Transcriptional Regulation",
+  kegg_ra_metabolism = "Retinoic Acid Metabolism",
+  ra_cellcycle = "RA-Regulated Cell Cycle Response",
+  junction_organization = "Cell Junction & Structural Organization",
+  xu_global_cm = "Cardiomyocyte Identity (Embryonic)",
+  xu_atrial = "Atrial Cardiomyocyte Identity",
+  xu_ventricular = "Ventricular Cardiomyocyte Identity",
+  xu_shf_pharyngeal = "Second Heart Field / Pharyngeal Mesoderm",
+  xu_anterior_lpm = "Anterior Lateral Plate Mesoderm",
+  xu_san = "Sinoatrial Node Identity",
+  xu_avc = "Atrioventricular Canal Identity",
+  xu_offtarget = "Off-Target Lineage Signature",
+  deBono_all_atrial = "Atrial Cardiomyocyte Identity (Refined)",
+  deBono_a1_atrial = "Atrial Identity (Early / Progenitor-like)",
+  deBono_a2_atrial = "Atrial Identity (Nodal-like)",
+  deBono_a3_atrial = "Atrial Identity (Left Atrial)",
+  deBono_a4_atrial = "Atrial Identity (Right Atrial)",
+  deBono_ventricular = "Ventricular Cardiomyocyte Identity",
+  deBono_epicardial = "Epicardial Identity",
+  deBono_stromal = "Cardiac Stromal Identity",
+  curated_pluripotency = "Pluripotency / Undifferentiated State (Curated)",
+  curated_ra_metabolism = "Retinoic Acid Metabolism (Curated)",
+  curated_hh_activity = "Hedgehog Signaling Activity (Curated)",
+  curated_hh_feedback = "Hedgehog Feedback / Readout (Curated)",
+  curated_wnt_activity = "Wnt Signaling Activity (Curated)",
+  curated_wnt_output = "Canonical Wnt Signaling Output (Curated)",
+  curated_RA_pSHF_target = "RA Cardiac-Specific Targets (Curated)"
+)
+
+
+# only valid modules are used
+modules_to_plot <- intersect(
+  names(module_titles),
+  unique(score_df$module)
+)
+
+# loop and plot + save
+purrr::walk(
+  modules_to_plot,
+  ~ plot_module_score(
+      df = score_df,
+      module_name = .x,
+      title = module_titles[[.x]],
+      output_dir = score_dir,
+      file_prefix = paste0(exp_name, "_", .x),
+      width = 6, height = 5,
+      facet_by = "treatment"
+    )
+)
+```
+
+### Atrial vs ventricular plot 
+```{r}
+atrial_ventricular_df <- score_df %>%
+  dplyr::filter(module %in% c("xu_atrial", "xu_ventricular")) %>%
+  dplyr::select(sampleID_unique, module, score, genotype, treatment, timepoint, day_num) %>%
+  tidyr::pivot_wider(
+    names_from = module,
+    values_from = score
+  )
+
+ggplot(
+  atrial_ventricular_df,
+  aes(x = xu_ventricular, y = xu_atrial, color = genotype)
+) +
+  geom_point(size = 3) +
+  geom_path(aes(group = interaction(genotype, treatment)), alpha = 0.5) +
+  facet_wrap(~ treatment) +
+  scale_color_manual(values = annotation_colors$genotype) +
+  labs(
+    x = "Ventricular identity score",
+    y = "Atrial identity score",
+    color = NULL,
+    title = "Atrial vs Ventricular Identity"
+  ) +
+  theme_pub() +
+  theme(legend.position = "top")
+```
+
+```{r}
+atrial_ventricular_df <- atrial_ventricular_df %>%
+  dplyr::mutate(
+    atrial_minus_ventricular = xu_atrial - xu_ventricular
+  )
+
+ggplot(
+  atrial_ventricular_df,
+  aes(x = day_num, y = atrial_minus_ventricular, color = genotype, group = genotype)
+) +
+  stat_summary(fun = mean, geom = "line", linewidth = 1.5) +
+  stat_summary(fun = mean, geom = "point", size = 2.5) +
+  facet_wrap(~ treatment) +
+  scale_x_continuous(
+    breaks = c(3, 4, 6, 8, 10),
+    labels = c("D3", "D4", "D6", "D8", "D10")
+  ) +
+  scale_color_manual(values = annotation_colors$genotype) +
+  labs(
+    title = "Relative Atrial vs Ventricular Identity",
+    x = NULL,
+    y = "Atrial - Ventricular score",
+    color = NULL
+  ) +
+  theme_pub() +
+  theme(
+    legend.position = "top",
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
 ```
 
 
-## --------------------
-# STEP 5: Chromosome Annotation
+
+### landscape plot
+```{r}
+# Cardiac Development vs Cell Cycle
+landscape_dir <- file.path(score_dir, "Singscore_Landscape")
+make_subdir(landscape_dir)
+
+# define gene sets
+cardiac_dev_genes <- usable_scoring_gene_sets[["progenitor"]]
+cell_cycle_genes  <- usable_scoring_gene_sets[["e2f"]]
+
+
+# rank genes for singscore
+ranked_expr <- singscore::rankGenes(expr_mat)
+
+# score each module
+cardiac_dev_score <- singscore::simpleScore(
+  ranked_expr,
+  upSet = cardiac_dev_genes
+)$TotalScore
+
+cell_cycle_score <- singscore::simpleScore(
+  ranked_expr,
+  upSet = cell_cycle_genes
+)$TotalScore
+
+# combine scores with metadata
+landscape_df <- tibble::tibble(
+  sampleID_unique = colnames(expr_mat),
+  Cardiac_Development = as.numeric(cardiac_dev_score),
+  Cell_Cycle = as.numeric(cell_cycle_score)
+) %>%
+  dplyr::left_join(metadata, by = "sampleID_unique") %>%
+  dplyr::mutate(
+    timepoint = factor(timepoint, levels = c("D3", "D4", "D6", "D8", "D10")),
+    treatment = factor(treatment, levels = c("CTRL", "RA")),
+    genotype = factor(genotype, levels = c("D21", "T21"))
+  )
+
+# quick check
+head(landscape_df)
+```
+
+#### all samples 
+```{r}
+
+# all samples
+
+p_landscape_all <- ggplot(
+  landscape_df,
+  aes(
+    x = Cardiac_Development,
+    y = Cell_Cycle,
+    color = timepoint,
+    shape = treatment
+  )) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = annotation_colors$timepoint, drop = FALSE) +
+  ggrepel::geom_text_repel(
+  aes(label = genotype),
+  size = 3,
+  max.overlaps = Inf)+
+  theme_pub(base_size = 14) +
+  labs(
+    title = "Cardiac development vs cell cycle landscape",
+    x = "Cardiac Development Score",
+    y = "Cell Cycle Score",
+    color = "Timepoint",
+    shape = "Treatment") +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "top")
+
+p_landscape_all
+
+ggsave(file.path(landscape_dir, paste0(exp_name, "_allSamples_SingLandscape_CardiacDev_vs_CellCycle.pdf")),
+  p_landscape_all, width = 5, height = 5, dpi = 300, bg = "white")
+```
+
+
+#### filtered
+```{r}
+# one treatment 
+landscape_ctrl <- landscape_df %>%
+  dplyr::filter(treatment == "RA")
+
+
+p_landscape_ctrl <- ggplot(landscape_ctrl,
+  aes(x = Cardiac_Development, y = Cell_Cycle,
+    color = genotype, shape = timepoint)) +
+  geom_point(size = 2, alpha = 0.8, stroke = 0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+  scale_color_manual(values = annotation_colors$genotype, drop = FALSE) +
+  theme_pub(base_size = 8) +
+  labs(
+    title = NULL,
+    x = "Cardiac Development",
+    y = "Cell Cycle",
+    color = NULL, shape = NULL) +
+  theme(
+    legend.position = "top",
+  )
+
+p_landscape_ctrl
+
+ggsave(file.path(landscape_dir, paste0(exp_name, "_RA_SingLandscape_CardiacDev_vs_CellCycle.pdf")), p_landscape_ctrl,
+  width =42, height = 64,  units = "mm", dpi = 300, bg = "white") # for figure 
+```
+
+# 3. GSEA
+```{r}
+
+library(enrichplot)
+library(msigdbr)
+
+gsea_dir <- file.path(comp_effects_path, "GSEA")
+make_subdir(gsea_dir)
+
+#DEG data 
+D21_unfiltered <- unfiltered_results[["D21_RA_vs_D21_CTRL"]] 
+T21_unfiltered <-  unfiltered_results[["T21_RA_vs_T21_CTRL"]] 
+
+#msigdbs
+msig_h <- msigdbr(species = "Homo sapiens", collection = "H") # hallmark sets
+msig_c2 <- msigdbr(species = "Homo sapiens", collection = "C2") # curated pathways 
+msig_c5 <- msigdbr(species = "Homo sapiens", collection = "C5")  # GO term
+
+# combine the relevant MSigDB collections
+msig_gsea_db <- dplyr::bind_rows(msig_h, msig_c2, msig_c5)
+```
+
+### Cardiac 
+```{r}
+# terms to test
+list_type <- "cardiac"
+
+gsea_terms <- c(
+  "GOBP_SARCOMERE_ORGANIZATION",
+  "REACTOME_STRIATED_MUSCLE_CONTRACTION",
+  "GOBP_CARDIAC_MUSCLE_CONTRACTION",
+  "KEGG_CARDIAC_MUSCLE_CONTRACTION",
+  "HALLMARK_G2M_CHECKPOINT",
+  "HALLMARK_E2F_TARGETS" 
+)
+
+# Build TERM2GENE from selected MSigDB terms 
+term2gene <- msig_gsea_db %>%
+  dplyr::filter(gs_name %in% gsea_terms) %>%
+  dplyr::select(gs_name, gene_symbol) %>%
+  dplyr::distinct()
+
+# sanity check
+setdiff(gsea_terms, unique(term2gene$gs_name))
+
+# Define input contrasts
+gsea_input_list <- list(
+  D21_D6_RA_vs_CTRL = D21_unfiltered[["D21_D6_RA_vs_D21_D6_CTRL"]],
+  D21_D8_RA_vs_CTRL = D21_unfiltered[["D21_D8_RA_vs_D21_D8_CTRL"]],
+  T21_D6_RA_vs_CTRL = T21_unfiltered[["T21_D6_RA_vs_T21_D6_CTRL"]],
+  T21_D8_RA_vs_CTRL = T21_unfiltered[["T21_D8_RA_vs_T21_D8_CTRL"]]
+)
+```
+
+###  Run & save
+```{r}
+
+# Run clusterProfiler GSEA for each contrast
+cp_gsea_list <- purrr::imap(
+  gsea_input_list,
+  ~ {
+    ranks <- prep_gsea_ranks(.x)
+    
+    clusterProfiler::GSEA(
+      geneList = ranks,
+      TERM2GENE = term2gene,
+      pvalueCutoff = 1,
+      verbose = FALSE
+    )
+  }
+)
+
+names(cp_gsea_list)
+
+# Save  GSEA results table
+cp_gsea_results <- purrr::imap_dfr(
+  cp_gsea_list,
+  ~ {
+    as_tibble(.x@result) %>%
+      dplyr::mutate(contrast = .y)
+  }
+)
+
+saveRDS(cp_gsea_results, file.path(rdata_path, paste0(exp_name, "_clusterProfiler_", list_type, "_GSEA_D6_D8_RA_vs_CTRL.rds")))
+
+readr::write_csv(cp_gsea_results, file.path(gsea_dir, paste0(exp_name, "_clusterProfiler_", list_type, "_GSEA_D6_D8_RA_vs_CTRL.csv")))
+```
+
+### Plots
+walk() applies a function (.f) only to each element, ignoring names or indices.
+iwalk() passes both the element (.x) and its index/name (.y) to the function
+```{r}
+# Loop through all contrasts and pathways and save full plots
+clean_file_label <- function(x) {
+  gsub("[^A-Za-z0-9_]+", "_", x)
+}
+
+purrr::iwalk(
+  cp_gsea_list,
+  ~ {
+    gsea_obj <- .x
+    contrast_nm <- .y
+    
+    valid_ids <- intersect(gsea_terms, gsea_obj@result$ID)
+    
+    purrr::walk(
+      valid_ids,
+      function(pathway_nm) {
+        
+        res_row <- cp_gsea_results %>%
+          dplyr::filter(
+            contrast == contrast_nm,
+            ID == pathway_nm
+          )
+        
+        plot_title <- paste0(
+          contrast_nm, "\n\n",
+          pathway_nm, "\n",
+          "NES = ", round(res_row$NES[1], 2),
+          " | FDR = ", signif(res_row$p.adjust[1], 2)
+        )
+        
+        p <- enrichplot::gseaplot2(
+          gsea_obj,
+          geneSetID = pathway_nm,
+          title = plot_title,
+          pvalue_table = FALSE
+        )
+        
+        ggsave(filename = file.path(gsea_dir,
+            paste0(clean_file_label(contrast_nm),
+              "__", clean_file_label(pathway_nm), "_gseaplot.pdf")),
+          plot = p, width = 6, height = 5, bg = "transparent"
+        )
+      }
+    )
+  }
+)
+```
+
+###  NES heatmap summary of results
+```{r}
+
+cp_heatmap_df <- cp_gsea_results %>%
+  dplyr::select(contrast, ID, NES) %>%
+  tidyr::pivot_wider(
+    names_from = contrast,
+    values_from = NES
+  )
+
+cp_heatmap_mat <- cp_heatmap_df %>%
+  tibble::column_to_rownames("ID") %>%
+  as.matrix()
+
+cp_heatmap_mat <- cp_heatmap_mat[, c(
+  "D21_D6_RA_vs_CTRL",
+  "D21_D8_RA_vs_CTRL",
+  "T21_D6_RA_vs_CTRL",
+  "T21_D8_RA_vs_CTRL"
+), drop = FALSE]
+
+desired_order <- c(
+  "GOBP_CARDIAC_MUSCLE_CONTRACTION",
+  "GOBP_SARCOMERE_ORGANIZATION",
+  "KEGG_CARDIAC_MUSCLE_CONTRACTION",
+  "REACTOME_STRIATED_MUSCLE_CONTRACTION",
+  "HALLMARK_E2F_TARGETS",
+  "HALLMARK_G2M_CHECKPOINT"
+)
+
+cp_heatmap_mat <- cp_heatmap_mat[desired_order, , drop = FALSE]
+
+annotation_col <- data.frame(
+  genotype = c("D21", "D21", "T21", "T21"),
+  timepoint = c("D6", "D8", "D6", "D8")
+)
+
+rownames(annotation_col) <- colnames(cp_heatmap_mat)
+ph_annotation_colors <- annotation_colors
+ph_annotation_colors$timepoint <- annotation_colors$timepoint[c("D6", "D8")]
+
+nes_heatmap <- pheatmap::pheatmap(
+  cp_heatmap_mat,
+  color = colors,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  annotation_col = annotation_col,
+  annotation_colors = ph_annotation_colors,
+  main = "GSEA NES: RA vs CTRL at D6 and D8"
+)
+
+nes_heatmap
+
+ggsave(filename = file.path(gsea_dir,
+            paste0(exp_name,"_NESheatmap.pdf")),
+          plot = nes_heatmap, width = 8, height = 5, bg = "transparent")
+```
+
+
+## DESeq RA interaction
+```{r}
+dds_int <- DESeqDataSetFromTximport(
+  txi = txi,
+  colData = metadata,
+  design = ~ cell_set + timepoint + genotype + treatment + genotype:treatment
+)
+
+dds_int <- DESeq(dds_int)
+resultsNames(dds_int)
+```
+
+
+
+
+#XXXXXXXXXXXXXXXXXXX
+
+# XXX 3. Chromosome Annotation
 Use same bed file that was used to map reads to annotate chromosomes
 - bed file give you chromosome -> tx_id 
 - txi gives you tx_id ->gene_id 
@@ -1120,16 +1702,218 @@ saveRDS(total_ratio_df, file = file.path(rdata_path, paste0(exp_name, "_total_ra
 ```
 
 
-## Check for sex 
+
+
+
+
+## GSEA
 ```{r}
-sex_qc <- make_sex_qc(vsd_mat, metadata, line_name = exp_name)
 
-sex_qc$plot
-sex_qc$predicted_sex
+library(enrichplot)
+library(msigdbr)
 
-outfile <- file.path(chrom_dir, paste0(exp_name, "_sexQC.pdf"))
+gsea_dir <- file.path(comp_effects_path, "GSEA")
+make_subdir(gsea_dir)
 
-ggsave(outfile, sex_qc$plot, width = 6, height = 5, dpi = 300)
+#DEG data 
+D21_unfiltered <- unfiltered_results[["D21_RA_vs_D21_CTRL"]] 
+T21_unfiltered <-  unfiltered_results[["T21_RA_vs_T21_CTRL"]] 
 
+#msigdbs
+msig_h <- msigdbr(species = "Homo sapiens", collection = "H") # hallmark sets
+msig_c2 <- msigdbr(species = "Homo sapiens", collection = "C2") # curated pathways 
+msig_c5 <- msigdbr(species = "Homo sapiens", collection = "C5")  # GO term
+
+# combine the relevant MSigDB collections
+msig_gsea_db <- dplyr::bind_rows(msig_h, msig_c2, msig_c5)
+```
+
+### Cardiac 
+```{r}
+# terms to test
+list_type <- "cardiac"
+
+gsea_terms <- c(
+  "GOBP_SARCOMERE_ORGANIZATION",
+  "REACTOME_STRIATED_MUSCLE_CONTRACTION",
+  "GOBP_CARDIAC_MUSCLE_CONTRACTION",
+  "KEGG_CARDIAC_MUSCLE_CONTRACTION",
+  "HALLMARK_G2M_CHECKPOINT",
+  "HALLMARK_E2F_TARGETS" 
+)
+
+# Build TERM2GENE from selected MSigDB terms 
+term2gene <- msig_gsea_db %>%
+  dplyr::filter(gs_name %in% gsea_terms) %>%
+  dplyr::select(gs_name, gene_symbol) %>%
+  dplyr::distinct()
+
+# sanity check
+setdiff(gsea_terms, unique(term2gene$gs_name))
+
+# Define input contrasts
+gsea_input_list <- list(
+  D21_D6_RA_vs_CTRL = D21_unfiltered[["D21_D6_RA_vs_D21_D6_CTRL"]],
+  D21_D8_RA_vs_CTRL = D21_unfiltered[["D21_D8_RA_vs_D21_D8_CTRL"]],
+  T21_D6_RA_vs_CTRL = T21_unfiltered[["T21_D6_RA_vs_T21_D6_CTRL"]],
+  T21_D8_RA_vs_CTRL = T21_unfiltered[["T21_D8_RA_vs_T21_D8_CTRL"]]
+)
+```
+
+###  Run & save
+```{r}
+
+# Run clusterProfiler GSEA for each contrast
+cp_gsea_list <- purrr::imap(
+  gsea_input_list,
+  ~ {
+    ranks <- prep_gsea_ranks(.x)
+    
+    clusterProfiler::GSEA(
+      geneList = ranks,
+      TERM2GENE = term2gene,
+      pvalueCutoff = 1,
+      verbose = FALSE
+    )
+  }
+)
+
+names(cp_gsea_list)
+
+# Save  GSEA results table
+cp_gsea_results <- purrr::imap_dfr(
+  cp_gsea_list,
+  ~ {
+    as_tibble(.x@result) %>%
+      dplyr::mutate(contrast = .y)
+  }
+)
+
+saveRDS(cp_gsea_results, file.path(rdata_path, paste0(exp_name, "_clusterProfiler_", list_type, "_GSEA_D6_D8_RA_vs_CTRL.rds")))
+
+readr::write_csv(cp_gsea_results, file.path(gsea_dir, paste0(exp_name, "_clusterProfiler_", list_type, "_GSEA_D6_D8_RA_vs_CTRL.csv")))
+```
+
+### Plots
+walk() applies a function (.f) only to each element, ignoring names or indices.
+iwalk() passes both the element (.x) and its index/name (.y) to the function
+```{r}
+# Loop through all contrasts and pathways and save full plots
+clean_file_label <- function(x) {
+  gsub("[^A-Za-z0-9_]+", "_", x)
+}
+
+purrr::iwalk(
+  cp_gsea_list,
+  ~ {
+    gsea_obj <- .x
+    contrast_nm <- .y
+    
+    valid_ids <- intersect(gsea_terms, gsea_obj@result$ID)
+    
+    purrr::walk(
+      valid_ids,
+      function(pathway_nm) {
+        
+        res_row <- cp_gsea_results %>%
+          dplyr::filter(
+            contrast == contrast_nm,
+            ID == pathway_nm
+          )
+        
+        plot_title <- paste0(
+          contrast_nm, "\n\n",
+          pathway_nm, "\n",
+          "NES = ", round(res_row$NES[1], 2),
+          " | FDR = ", signif(res_row$p.adjust[1], 2)
+        )
+        
+        p <- enrichplot::gseaplot2(
+          gsea_obj,
+          geneSetID = pathway_nm,
+          title = plot_title,
+          pvalue_table = FALSE
+        )
+        
+        ggsave(filename = file.path(gsea_dir,
+            paste0(clean_file_label(contrast_nm),
+              "__", clean_file_label(pathway_nm), "_gseaplot.pdf")),
+          plot = p, width = 6, height = 5, bg = "transparent"
+        )
+      }
+    )
+  }
+)
+```
+
+###  NES heatmap summary of results
+```{r}
+
+cp_heatmap_df <- cp_gsea_results %>%
+  dplyr::select(contrast, ID, NES) %>%
+  tidyr::pivot_wider(
+    names_from = contrast,
+    values_from = NES
+  )
+
+cp_heatmap_mat <- cp_heatmap_df %>%
+  tibble::column_to_rownames("ID") %>%
+  as.matrix()
+
+cp_heatmap_mat <- cp_heatmap_mat[, c(
+  "D21_D6_RA_vs_CTRL",
+  "D21_D8_RA_vs_CTRL",
+  "T21_D6_RA_vs_CTRL",
+  "T21_D8_RA_vs_CTRL"
+), drop = FALSE]
+
+desired_order <- c(
+  "GOBP_CARDIAC_MUSCLE_CONTRACTION",
+  "GOBP_SARCOMERE_ORGANIZATION",
+  "KEGG_CARDIAC_MUSCLE_CONTRACTION",
+  "REACTOME_STRIATED_MUSCLE_CONTRACTION",
+  "HALLMARK_E2F_TARGETS",
+  "HALLMARK_G2M_CHECKPOINT"
+)
+
+cp_heatmap_mat <- cp_heatmap_mat[desired_order, , drop = FALSE]
+
+annotation_col <- data.frame(
+  genotype = c("D21", "D21", "T21", "T21"),
+  timepoint = c("D6", "D8", "D6", "D8")
+)
+
+rownames(annotation_col) <- colnames(cp_heatmap_mat)
+ph_annotation_colors <- annotation_colors
+ph_annotation_colors$timepoint <- annotation_colors$timepoint[c("D6", "D8")]
+
+nes_heatmap <- pheatmap::pheatmap(
+  cp_heatmap_mat,
+  color = colors,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  annotation_col = annotation_col,
+  annotation_colors = ph_annotation_colors,
+  main = "GSEA NES: RA vs CTRL at D6 and D8"
+)
+
+nes_heatmap
+
+ggsave(filename = file.path(gsea_dir,
+            paste0(exp_name,"_NESheatmap.pdf")),
+          plot = nes_heatmap, width = 8, height = 5, bg = "transparent")
+```
+
+
+## DESeq RA interaction
+```{r}
+dds_int <- DESeqDataSetFromTximport(
+  txi = txi,
+  colData = metadata,
+  design = ~ cell_set + timepoint + genotype + treatment + genotype:treatment
+)
+
+dds_int <- DESeq(dds_int)
+resultsNames(dds_int)
 ```
 
